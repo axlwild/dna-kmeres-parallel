@@ -18,6 +18,16 @@ void sequentialKmerCount(vector<string> &seqs, vector<string> &permutations , in
 // Vectors to store ids and seqs
 vector<string> ids;
 vector<string> seqs;
+int size;
+int permutationsSize;
+int countArraySize;
+// Device
+vector<string> * d_seqs;
+vector<string> * d_permutations;
+int *d_count;
+
+char** seqs_ptr;
+char** perms_ptr;
 
 const char * perms[] = {"AAA", "AAC", "AAT","AAG",
                       "ACA", "ACC", "ACT","ACG",
@@ -44,9 +54,6 @@ vector<string> permutationsList (perms, end(perms));
 float ** distancesSequential;
 float ** distancesParallel;
 
-__global__ void kmersCount(thrust::device_vector<string> * h_seqs){
-
-}
 
 int main(int argc, char **argv) {
     int len = strlen("ACGT") ;
@@ -74,10 +81,6 @@ int main(int argc, char **argv) {
             distancesParallel[i][j] = 0;
         }
     }
-
-    thrust::device_vector<string> h_seqs (seqs);
-    kmersCount<<<1,1>>>(&h_seqs);
-
 
     sequentialKmerCount(seqs, permutationsList, 3);
     for (int i = 0; i < numberOfSequenses ; i++){
