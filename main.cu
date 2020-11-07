@@ -8,6 +8,8 @@
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
 #include <sstream>
+#include <typeinfo>
+#include "cuda.h"
 
 using namespace std;
 // Method definition
@@ -50,7 +52,7 @@ __constant__ const char* c_perms[] = {"AAA", "AAC", "AAT","AAG",
                                       "TCA", "TCC", "TCT","TCG",
                                       "TTA", "TTC", "TTT","TTG",
                                       "TGA", "TGC", "TGT","TGG",
-};
+} ;
 __constant__ int  c_size ;
 const char * perms[] = {"AAA", "AAC", "AAT","AAG",
                       "ACA", "ACC", "ACT","ACG",
@@ -72,40 +74,45 @@ const char * perms[] = {"AAA", "AAC", "AAT","AAG",
                       "TTA", "TTC", "TTT","TTG",
                       "TGA", "TGC", "TGT","TGG",
 };
-int permsSize = sizeof(perms) / sizeof("AAA");
+int permsSize = sizeof(perms) ;
 
 vector<string> permutationsList (perms, end(perms));
 
 float ** distancesSequential;
 float ** distancesParallel;
-
+/*
 string join(const vector<string>& vec, const char* delim){
     stringstream res;
-    copy(vec.begin(), vec.end(), ostream_iterator<string>(res, delim));
+    copy(vec.begin(), vec.end(), ostream_iterator<string>(res, delimiter.c_str()));
     return res.str();
+}
+ */
+string join(const std::vector<std::string> &lst, const std::string &delim){
+    std::string ret;
+    for(const auto &s : lst) {
+        if(!ret.empty())
+            ret += delim;
+        ret += s;
+    }
+    return ret;
 }
 
 __global__ void parallelKDist(char *data, unsigned int *indices, float*distances, unsigned num_strings){
     int idx = threadIdx.x+blockDim.x*blockIdx.x;
-    char * sequence = data+indices[idx] ;
-    bool is_coincidence = true;
+    char * sequence = data+indices[idx];
+
     if (idx < num_strings && blockIdx.x < sizeof(indices)){
+        //printf("Secuencia en índice %d: idx[x]: %d %s\n", idx, indices[idx], sequence);
         // iterating over permutations
         printf("soy  el índice %d\n y c_size vale %d\n", idx, c_size);
-        printf("Sequence vale: %s", sequence);
         for(int i = 0 ; i < c_size; i++){
+            printf("Perms: %s",c_perms[0]);
             for(int j = 0; j < 3; j++){
-
-                //c_perms[i][j]
-                printf("Secuencia: %c\n",sequence[j]);
-
-                if (sequence[j] != c_perms[i][j]){
-                    is_coincidence = false;
-                    continue;
+                //printf("Secuencia: %c, _perms[i,j]:%c\n",sequence[j], c_perms[i][j]);
+                //printf("Hola\n");
+                if (sequence[j] == c_perms[i][j]){
+                    atomicAdd(&(distances[idx]), 1);
                 }
-            }
-            if(is_coincidence){
-                atomicAdd(&(distances[idx]), 1);
             }
         }
     }
@@ -156,7 +163,27 @@ int main(int argc, char **argv) {
     const char * data = data_aux.c_str()
     std::copy(seqs.begin(), seqs.end(), std::ostream_iterator<std::string>(imploded, "\0"));
      */
-    error = cudaMemcpyToSymbol(c_perms, perms, sizeof(perms) / sizeof("AAA") );
+    const char * c_perms[] = {"AAA", "AAC", "AAT","AAG",
+                              "ACA", "ACC", "ACT","ACG",
+                              "ATA", "ATC", "ATT","ATG",
+                              "AGA", "AGC", "AGT","AGG",
+
+                              "CAA", "CAC", "CAT","CAG",
+                              "CCA", "CCC", "CCT","CCG",
+                              "CTA", "CTC", "CTT","CTG",
+                              "CGA", "CGC", "CGT","CGG",
+
+                              "GAA", "GAC", "GAT","GAG",
+                              "GCA", "GCC", "GCT","GCG",
+                              "GTA", "GTC", "GTT","GTG",
+                              "GGA", "GGC", "GGT","GGG",
+
+                              "TAA", "TAC", "TAT","TAG",
+                              "TCA", "TCC", "TCT","TCG",
+                              "TTA", "TTC", "TTT","TTG",
+                              "TGA", "TGC", "TGT","TGG",
+    };
+    error = cudaMemcpyToSymbol(c_perms, perms, 64 * sizeof(char*) );
     if (error){
         printf("Errors %d", error);
     }
@@ -184,7 +211,7 @@ int main(int argc, char **argv) {
     float *h_distances;
     h_distances =(float*) malloc(sizeDistances);
 
-    error = cudaMemcpy(d_data, data, sizeof(data), cudaMemcpyHostToDevice);
+    error = cudaMemcpy(d_data, data, data_aux.size(), cudaMemcpyHostToDevice);
     if (error){
         printf("Error %d", error);
     }
