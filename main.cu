@@ -97,29 +97,51 @@ string join(const std::vector<std::string> &lst, const std::string &delim){
     return ret;
 }
 
-__global__ void parallelKDist(char *data, unsigned int *indices, float*distances, unsigned num_strings, int *sums){
+__global__ void parallelKDist(char *data, unsigned int *indices, float*distances, unsigned num_strings, int *suma){
     // each block is comparing a sample with others
     int idx = threadIdx.x+blockDim.x*blockIdx.x;
-    char * sequence = data+indices[idx];
-    if (idx < num_strings && blockIdx.x < sizeof(indices)){
-        bool is_same_kmere;
-        //printf("Secuencia en índice %d: idx[x]: %d %s\n", idx, indices[idx], sequence);
-        // iterating over permutations
-        for(int i = 0 ; i < c_size; i++){
+    if (idx < num_strings && blockIdx.x < sizeof(indices) && threadIdx.x < 64){
+        // Fase uno: sumamos todos los valores de la suma de los k-meros de cada entrada.
+        // Cada bloque se encarga de calcular la suma de cada entrada
+        int entry = blockIdx.x;
+        // Cada hilo se encarga de sumar cada permutación.
+        // en suma guardamos las apariciones de las 64 posibles combinaciones.
+        // Si cada hilo se encargara de cada k-mero no habría por qué hacer la operación atómica.
+        const char *currentKmere = c_perms[threadIdx.x];
+        // Entonces cada hilo tendría que iterar toda la muestra solo una vez para calcular la suma.
+        int entryLength = sizeof(data+indices[entry])/sizeof(char *);
+        // entonces iteramos por cada letra de la entrada hasta la N-k (los índices).
+        // Podríamos guardar los índices en memoria constante para agilizar la lectura...
+        bool is_same_kmere = true;
+        char * sequence = data+indices[entry];
+        char currentSubstringFromSample[4];
+        for (int i = 0; i < entryLength-3; i++){
+            memcpy( currentSubstringFromSample, &sequence[i], 3 );
+            currentSubstringFromSample[3] = '\0';
             is_same_kmere = true;
             for(int j = 0; j < 3; j++){
-                if (sequence[j] == c_perms[i][j]){
+                if (sequence[j] == currentKmere[j]){
                     continue;
                 }
                 is_same_kmere = false;
                 break;
             }
             if(is_same_kmere){
-                printf("doing atomic add");
-                atomicAdd(&(distances[idx]), 1);
+                suma[entry*blockDim.x+threadIdx.x] += 1;
             }
         }
+        // Fase dos.
+        // Sumamos los mínimos de las cadenas comparadas.
+        __syncthreads();
+        int nextEntryLength;
+        for(int j = entry + 1; j < num_strings; j++){
+            nextEntryLength = sizeof(data+indices[j])/sizeof(char *);
+            distances[entry*threadIdx.x+j] = 1 - min(suma[entry*blockDim.x+threadIdx.x],suma[j*blockDim.x+threadIdx.x])
+                    / (min(nextEntryLength, entryLength) -3 + 1);
+        }
     }
+
+
 }
 
 int main(int argc, char **argv) {
@@ -134,8 +156,8 @@ int main(int argc, char **argv) {
     }
     */
     // absolute path of the input data
-    string file = "/home/acervantes/plants.fasta";
-    //string file = "/home/acervantes/all_seqs.fasta";
+    //string file = "/home/acervantes/plants.fasta";
+    string file = "/home/acervantes/all_seqs.fasta";
     importSeqs(file);
     // Reserving memory for resultsf
     numberOfSequenses = seqs.size();
@@ -189,7 +211,7 @@ int main(int argc, char **argv) {
     };
     error = cudaMemcpyToSymbol(c_perms, perms, 64 * sizeof(char*) );
     if (error){
-        printf("Errorst %d", error);
+        printf("Errorsti %d", error);
     }
     error = cudaMemcpyToSymbol(c_size, &permsSize, sizeof(int) );
     if (error){
