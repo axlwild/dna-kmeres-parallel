@@ -5,8 +5,6 @@
 #include <set>
 #include <math.h>
 #include <algorithm>
-#include <thrust/device_vector.h>
-#include <thrust/host_vector.h>
 #include <sstream>
 #include <typeinfo>
 #include "cuda.h"
@@ -109,7 +107,7 @@ __global__ void parallelKDist(char *data, unsigned int *indices, float*distances
         // Si cada hilo se encargara de cada k-mero no habría por qué hacer la operación atómica.
         const char *currentKmere = c_perms[threadIdx.x];
         // Entonces cada hilo tendría que iterar toda la muestra solo una vez para calcular la suma.
-        int entryLength = sizeof(data+indices[entry])/sizeof(char *);
+        int entryLength = indices[entry + 1] -  indices[entry];
         // entonces iteramos por cada letra de la entrada hasta la N-k (los índices).
         // Podríamos guardar los índices en memoria constante para agilizar la lectura...
         bool is_same_kmere = true;
@@ -134,10 +132,10 @@ __global__ void parallelKDist(char *data, unsigned int *indices, float*distances
         // Sumamos los mínimos de las cadenas comparadas.
         __syncthreads();
         int nextEntryLength;
-        for(int j = entry + 1; j < num_strings; j++){
-            nextEntryLength = sizeof(data+indices[j])/sizeof(char *);
-            distances[entry*threadIdx.x+j] = 1 - min(suma[entry*blockDim.x+threadIdx.x],suma[j*blockDim.x+threadIdx.x])
-                    / (min(nextEntryLength, entryLength) -3 + 1);
+        for(int j = entry + 1; j < num_strings - 1; j++){
+            nextEntryLength = indices[j + 1] -  indices[j];
+            distances[entry*threadIdx.x+j] = 1 - min(suma[entry*blockDim.x+threadIdx.x],suma[j*blockDim.x+threadIdx.x])/ (min(nextEntryLength, entryLength) -3 + 1);
+
         }
     }
 
@@ -156,8 +154,8 @@ int main(int argc, char **argv) {
     }
     */
     // absolute path of the input data
-    //string file = "/home/acervantes/plants.fasta";
-    string file = "/home/acervantes/all_seqs.fasta";
+    string file = "/home/acervantes/plants.fasta";
+    //string file = "/home/acervantes/all_seqs.fasta";
     importSeqs(file);
     // Reserving memory for resultsf
     numberOfSequenses = seqs.size();
@@ -211,14 +209,13 @@ int main(int argc, char **argv) {
     };
     error = cudaMemcpyToSymbol(c_perms, perms, 64 * sizeof(char*) );
     if (error){
-        printf("Errorsti %d", error);
+        printf("Errorsti : %d:", error);
     }
     error = cudaMemcpyToSymbol(c_size, &permsSize, sizeof(int) );
     if (error){
-        printf("Errorsy %d", error);
+        printf("Error %d", error);
     }
-
-    int sizeDistances = numberOfSequenses*numberOfSequenses * sizeof(float);
+    unsigned long int sizeDistances = numberOfSequenses*numberOfSequenses * sizeof(float);
     string data_aux = join(seqs, "\0");
     data = data_aux.c_str();
     int indexes[indexes_aux.size()];
@@ -229,7 +226,12 @@ int main(int argc, char **argv) {
     //std::copy(indexes_aux.begin(), indexes_aux.end(), indexes);
 
     cudaMalloc((void **)&d_data, data_aux.size());
-    cudaMalloc((void **)&d_distances, sizeDistances);
+    error = cudaMalloc((void **)&d_distances, sizeDistances);
+    if (error){
+        printf("Error al usar memoria con distancia %d ::", error);
+        cout << sizeDistances << endl;
+        return 0;
+    }
     error = cudaMalloc((void **)&d_indices, sizeof(indexes));
     if (error){
         printf("Errorsse %d", error);
