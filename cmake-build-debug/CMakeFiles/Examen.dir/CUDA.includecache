@@ -1,0 +1,20 @@
+#IncludeRegexLine: ^[ 	]*[#%][ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+/tmp/tmp.QactJtvD3k/main.cu
+iostream
+-
+stdio.h
+-
+time.h
+-
+cstdlib
+-
+math.h
+-
+
