@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
+#include <sstream>
 
 using namespace std;
 // Method definition
@@ -18,16 +19,18 @@ void sequentialKmerCount(vector<string> &seqs, vector<string> &permutations , in
 // Vectors to store ids and seqs
 vector<string> ids;
 vector<string> seqs;
+vector<int> indexes_aux;
 int size;
 int permutationsSize;
 int countArraySize;
-// Device
-vector<string> * d_seqs;
-vector<string> * d_permutations;
-int *d_count;
 
-char** seqs_ptr;
-char** perms_ptr;
+
+// Device variables.
+char * d_data; // all the strings.
+char * d_indexes;
+char * d_distances;
+const char * data;
+int * indexes;
 
 const char * perms[] = {"AAA", "AAC", "AAT","AAG",
                       "ACA", "ACC", "ACT","ACG",
@@ -54,13 +57,26 @@ vector<string> permutationsList (perms, end(perms));
 float ** distancesSequential;
 float ** distancesParallel;
 
+string join(const vector<string>& vec, const char* delim){
+    stringstream res;
+    copy(vec.begin(), vec.end(), ostream_iterator<string>(res, delim));
+    return res.str();
+}
+
+__global__ void kern_1D(char *data, unsigned *indices, unsigned num_strings){
+
+    int idx = threadIdx.x+blockDim.x*blockIdx.x;
+    if (idx < num_strings)
+        printf("Hello from thread %d, my string is %s\n", idx, data+indices[idx]);
+}
 
 int main(int argc, char **argv) {
-    int len = strlen("ACGT") ;
     //char permutations[len];
     int numberOfSequenses = 0;
     //getPermutations(chars, permutations, len - 1, 0);
-    /*for (int i = 0; i < permutationsList.size() ; i++){
+    /*
+     * int len = strlen("ACGT") ;
+     * for (int i = 0; i < permutationsList.size() ; i++){
         cout << permutationsList.at(i) << endl;
     }
     */
@@ -89,12 +105,26 @@ int main(int argc, char **argv) {
         }
         cout << endl;
     }
+
+    // Device allocation
+    /*
+    std::ostringstream data_aux;
+    const char * data = data_aux.c_str()
+    std::copy(seqs.begin(), seqs.end(), std::ostream_iterator<std::string>(imploded, "\0"));
+     */
+
+    string data_aux = join(seqs, "\0");
+    data = data_aux.c_str();
+    indexes = (int * ) malloc(indexes_aux.size());
+    std::copy(indexes_aux.begin(), indexes_aux.end(), indexes);
+
     free(distancesSequential);
     free(distancesParallel);
     return 0;
 }
 
 void importSeqs(string inputFile){
+    int indexCounter = 0;
     ifstream input(inputFile);
     if (!input.good()) {
         std::cerr << "Error opening: " << inputFile << " . Check your file or pathh." << std::endl;
@@ -122,6 +152,8 @@ void importSeqs(string inputFile){
         else {
             if (newSeq) {
                 seqs.push_back(line);
+                indexes_aux.push_back(indexCounter);
+                indexCounter += line.size();
                 newSeq = false;
             }
             else
