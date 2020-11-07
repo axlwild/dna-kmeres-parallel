@@ -22,16 +22,16 @@ void sequentialKmerCount(vector<string> &seqs, vector<string> &permutations , in
 vector<string> ids;
 vector<string> seqs;
 vector<int> indexes_aux;
-int size;
-int permutationsSize;
-int countArraySize;
-
 
 // Device variables.
 char * d_data; // all the strings.
 unsigned int * d_indices;
 float * d_distances;
 const char * data;
+
+// coincidences of k-mer on each input
+int * d_sums;
+int * h_sums;
 
 __constant__ const char* c_perms[] = {"AAA", "AAC", "AAT","AAG",
                                       "ACA", "ACC", "ACT","ACG",
@@ -97,22 +97,26 @@ string join(const std::vector<std::string> &lst, const std::string &delim){
     return ret;
 }
 
-__global__ void parallelKDist(char *data, unsigned int *indices, float*distances, unsigned num_strings){
+__global__ void parallelKDist(char *data, unsigned int *indices, float*distances, unsigned num_strings, int *sums){
+    // each block is comparing a sample with others
     int idx = threadIdx.x+blockDim.x*blockIdx.x;
     char * sequence = data+indices[idx];
-
     if (idx < num_strings && blockIdx.x < sizeof(indices)){
+        bool is_same_kmere;
         //printf("Secuencia en índice %d: idx[x]: %d %s\n", idx, indices[idx], sequence);
         // iterating over permutations
-        printf("soy  el índice %d\n y c_size vale %d\n", idx, c_size);
         for(int i = 0 ; i < c_size; i++){
-            printf("Perms: %s",c_perms[0]);
+            is_same_kmere = true;
             for(int j = 0; j < 3; j++){
-                //printf("Secuencia: %c, _perms[i,j]:%c\n",sequence[j], c_perms[i][j]);
-                //printf("Hola\n");
                 if (sequence[j] == c_perms[i][j]){
-                    atomicAdd(&(distances[idx]), 1);
+                    continue;
                 }
+                is_same_kmere = false;
+                break;
+            }
+            if(is_same_kmere){
+                printf("doing atomic add");
+                atomicAdd(&(distances[idx]), 1);
             }
         }
     }
@@ -158,11 +162,11 @@ int main(int argc, char **argv) {
      */
 
     // Device allocation
-    /*
-    std::ostringstream data_aux;
-    const char * data = data_aux.c_str()
-    std::copy(seqs.begin(), seqs.end(), std::ostream_iterator<std::string>(imploded, "\0"));
-     */
+    int sumsSize = sizeof(int)*numberOfSequenses*64;
+    h_sums = (int*) malloc(sumsSize);
+    cudaMalloc((void**)&d_sums, sumsSize);
+
+
     const char * c_perms[] = {"AAA", "AAC", "AAT","AAG",
                               "ACA", "ACC", "ACT","ACG",
                               "ATA", "ATC", "ATT","ATG",
@@ -185,11 +189,11 @@ int main(int argc, char **argv) {
     };
     error = cudaMemcpyToSymbol(c_perms, perms, 64 * sizeof(char*) );
     if (error){
-        printf("Errors %d", error);
+        printf("Errorst %d", error);
     }
     error = cudaMemcpyToSymbol(c_size, &permsSize, sizeof(int) );
     if (error){
-        printf("Errors %d", error);
+        printf("Errorsy %d", error);
     }
 
     int sizeDistances = numberOfSequenses*numberOfSequenses * sizeof(float);
@@ -206,7 +210,7 @@ int main(int argc, char **argv) {
     cudaMalloc((void **)&d_distances, sizeDistances);
     error = cudaMalloc((void **)&d_indices, sizeof(indexes));
     if (error){
-        printf("Errors %d", error);
+        printf("Errorsse %d", error);
     }
     float *h_distances;
     h_distances =(float*) malloc(sizeDistances);
@@ -226,7 +230,7 @@ int main(int argc, char **argv) {
     cudaEventCreate(&stop);
     cudaEventRecord(start,0);
     // Launch kernel
-    parallelKDist<<<blocks, threads>>>(d_data, d_indices, d_distances, numberOfSequenses);
+    parallelKDist<<<blocks, threads>>>(d_data, d_indices, d_distances, numberOfSequenses, d_sums);
     cudaEventRecord(stop,0);
     cudaEventSynchronize(stop);
     float parallelTimer = 0;
@@ -238,6 +242,7 @@ int main(int argc, char **argv) {
     cudaFree(d_distances);
     cudaFree(d_indices);
     cudaFree(d_data);
+    cudaFree(d_sums);
     return 0;
 }
 
