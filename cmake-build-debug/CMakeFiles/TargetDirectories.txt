@@ -1,3 +1,0 @@
-/tmp/tmp.QactJtvD3k/cmake-build-debug/CMakeFiles/rebuild_cache.dir
-/tmp/tmp.QactJtvD3k/cmake-build-debug/CMakeFiles/Examen.dir
-/tmp/tmp.QactJtvD3k/cmake-build-debug/CMakeFiles/edit_cache.dir

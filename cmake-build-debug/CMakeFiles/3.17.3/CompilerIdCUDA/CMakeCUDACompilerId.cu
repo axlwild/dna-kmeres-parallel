@@ -200,8 +200,29 @@ char const* info_simulate = "INFO" ":" "simulate[" SIMULATE_ID "]";
 # if defined(__ICCARM__)
 #  define ARCHITECTURE_ID "ARM"
 
+# elif defined(__ICCRX__)
+#  define ARCHITECTURE_ID "RX"
+
+# elif defined(__ICCRH850__)
+#  define ARCHITECTURE_ID "RH850"
+
+# elif defined(__ICCRL78__)
+#  define ARCHITECTURE_ID "RL78"
+
+# elif defined(__ICCRISCV__)
+#  define ARCHITECTURE_ID "RISCV"
+
 # elif defined(__ICCAVR__)
 #  define ARCHITECTURE_ID "AVR"
+
+# elif defined(__ICC430__)
+#  define ARCHITECTURE_ID "MSP430"
+
+# elif defined(__ICCV850__)
+#  define ARCHITECTURE_ID "V850"
+
+# elif defined(__ICC8051__)
+#  define ARCHITECTURE_ID "8051"
 
 # else /* unknown architecture */
 #  define ARCHITECTURE_ID ""
@@ -317,7 +338,7 @@ const char* info_language_dialect_default = "INFO" ":" "dialect_default["
 #elif __cplusplus >= 201103L
   "11"
 #else
-  "98"
+  "03"
 #endif
 "]";
 

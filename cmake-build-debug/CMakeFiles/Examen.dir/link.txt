@@ -1,1 +1,0 @@
-/usr/bin/g++  CMakeFiles/Examen.dir/main.cu.o CMakeFiles/Examen.dir/cmake_device_link.o -o Examen  -L"/usr/lib64/stubs" -L"/usr/lib64" -lcudadevrt -lcudart_static -lrt -lpthread -ldl

@@ -154,7 +154,8 @@ int main(int argc, char **argv) {
     }
     */
     // absolute path of the input data
-    string file = "/home/acervantes/plants.fasta";
+    //string file = "/home/acervantes/plants.fasta";
+    string file = "/home/acervantes/all.fasta";
     //string file = "/home/acervantes/all_seqs.fasta";
     importSeqs(file);
     // Reserving memory for resultsf
@@ -171,15 +172,13 @@ int main(int argc, char **argv) {
             //distancesParallel[i][j] = 0;
         }
     }
-    /*
+
+    clock_t start_ser = clock();
     sequentialKmerCount(seqs, permutationsList, 3);
-    for (int i = 0; i < numberOfSequenses ; i++){
-        for (int j = 0; j < numberOfSequenses ; j++) {
-            cout << distancesSequential[i][j] << "\t";
-        }
-        cout << endl;
-    }
-     */
+    clock_t end_ser = clock();
+    double serialTimer = 0;
+    serialTimer = double (end_ser-start_ser) / double(CLOCKS_PER_SEC);
+    cout << "Elapsed time serial: " << serialTimer << endl;
 
     // Device allocation
     int sumsSize = sizeof(int)*numberOfSequenses*64;
