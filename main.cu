@@ -155,7 +155,7 @@ int main(int argc, char **argv) {
     */
     // absolute path of the input data
     //string file = "/home/acervantes/plants.fasta";
-    string file = "/home/acervantes/all.fasta";
+    string file = "/home/acervantes/kmerDist/plants.fasta";
     //string file = "/home/acervantes/all_seqs.fasta";
     importSeqs(file);
     // Reserving memory for resultsf
