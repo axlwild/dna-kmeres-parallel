@@ -31,46 +31,49 @@ const char * data;
 int * d_sums;
 int * h_sums;
 
-__constant__ const char* c_perms[] = {"AAA", "AAC", "AAT","AAG",
-                                      "ACA", "ACC", "ACT","ACG",
-                                      "ATA", "ATC", "ATT","ATG",
-                                      "AGA", "AGC", "AGT","AGG",
+// number of permutations of RNA K_meres and k-value
+__constant__ char c_perms[64][4] = {
+    "AAA", "AAC", "AAT","AAG",
+    "ACA", "ACC", "ACT","ACG",
+    "ATA", "ATC", "ATT","ATG",
+    "AGA", "AGC", "AGT","AGG",
 
-                                      "CAA", "CAC", "CAT","CAG",
-                                      "CCA", "CCC", "CCT","CCG",
-                                      "CTA", "CTC", "CTT","CTG",
-                                      "CGA", "CGC", "CGT","CGG",
+    "CAA", "CAC", "CAT","CAG",
+    "CCA", "CCC", "CCT","CCG",
+    "CTA", "CTC", "CTT","CTG",
+    "CGA", "CGC", "CGT","CGG",
 
-                                      "GAA", "GAC", "GAT","GAG",
-                                      "GCA", "GCC", "GCT","GCG",
-                                      "GTA", "GTC", "GTT","GTG",
-                                      "GGA", "GGC", "GGT","GGG",
+    "GAA", "GAC", "GAT","GAG",
+    "GCA", "GCC", "GCT","GCG",
+    "GTA", "GTC", "GTT","GTG",
+    "GGA", "GGC", "GGT","GGG",
 
-                                      "TAA", "TAC", "TAT","TAG",
-                                      "TCA", "TCC", "TCT","TCG",
-                                      "TTA", "TTC", "TTT","TTG",
-                                      "TGA", "TGC", "TGT","TGG",
-} ;
+    "TAA", "TAC", "TAT","TAG",
+    "TCA", "TCC", "TCT","TCG",
+    "TTA", "TTC", "TTT","TTG",
+    "TGA", "TGC", "TGT","TGG",
+};
 __constant__ int  c_size ;
-const char * perms[] = {"AAA", "AAC", "AAT","AAG",
-                      "ACA", "ACC", "ACT","ACG",
-                      "ATA", "ATC", "ATT","ATG",
-                      "AGA", "AGC", "AGT","AGG",
+char perms[64][4] = {
+                        "AAA", "AAC", "AAT","AAG",
+                        "ACA", "ACC", "ACT","ACG",
+                        "ATA", "ATC", "ATT","ATG",
+                        "AGA", "AGC", "AGT","AGG",
 
-                      "CAA", "CAC", "CAT","CAG",
-                      "CCA", "CCC", "CCT","CCG",
-                      "CTA", "CTC", "CTT","CTG",
-                      "CGA", "CGC", "CGT","CGG",
+                        "CAA", "CAC", "CAT","CAG",
+                        "CCA", "CCC", "CCT","CCG",
+                        "CTA", "CTC", "CTT","CTG",
+                        "CGA", "CGC", "CGT","CGG",
 
-                      "GAA", "GAC", "GAT","GAG",
-                      "GCA", "GCC", "GCT","GCG",
-                      "GTA", "GTC", "GTT","GTG",
-                      "GGA", "GGC", "GGT","GGG",
+                        "GAA", "GAC", "GAT","GAG",
+                        "GCA", "GCC", "GCT","GCG",
+                        "GTA", "GTC", "GTT","GTG",
+                        "GGA", "GGC", "GGT","GGG",
 
-                      "TAA", "TAC", "TAT","TAG",
-                      "TCA", "TCC", "TCT","TCG",
-                      "TTA", "TTC", "TTT","TTG",
-                      "TGA", "TGC", "TGT","TGG",
+                        "TAA", "TAC", "TAT","TAG",
+                        "TCA", "TCC", "TCT","TCG",
+                        "TTA", "TTC", "TTT","TTG",
+                        "TGA", "TGC", "TGT","TGG",
 };
 int permsSize = sizeof(perms) ;
 
@@ -97,6 +100,9 @@ string join(const std::vector<std::string> &lst, const std::string &delim){
 
 __global__ void parallelKDist(char *data, unsigned int *indices, float*distances, unsigned num_strings, int *suma){
     // each block is comparing a sample with others
+
+    if (blockIdx.x == 0 && threadIdx.x == 0)
+        printf("c_perms: %s\n", c_perms[0]);
     int idx = threadIdx.x+blockDim.x*blockIdx.x;
     if (idx < num_strings && blockIdx.x < sizeof(indices) && threadIdx.x < 64){
         // Fase uno: sumamos todos los valores de la suma de los k-meros de cada entrada.
@@ -144,22 +150,18 @@ __global__ void parallelKDist(char *data, unsigned int *indices, float*distances
 
 int main(int argc, char **argv) {
     //char permutations[len];
-    int error;
+    cudaError_t error;
     int numberOfSequenses = 0;
-    //getPermutations(chars, permutations, len - 1, 0);
-    /*
-     * int len = strlen("ACGT") ;
-     * for (int i = 0; i < permutationsList.size() ; i++){
-        cout << permutationsList.at(i) << endl;
-    }
-    */
     // absolute path of the input data
-    //string file = "/home/acervantes/plants.fasta";
     string file = "/home/acervantes/kmerDist/plants.fasta";
     //string file = "/home/acervantes/all_seqs.fasta";
     importSeqs(file);
-    // Reserving memory for resultsf
+
+    // results files
+    FILE *f_seq = fopen("sequential_results.csv", "w");
+    // Reserving memory for results
     numberOfSequenses = seqs.size();
+    //printf("%d sequences founded", numberOfSequenses);
     distancesSequential = (float**) malloc(sizeof(float*) * numberOfSequenses);
     //distancesParallel   = (float**) malloc(sizeof(float*) * numberOfSequenses);
     for(int i = 0; i < numberOfSequenses; i++){
@@ -168,7 +170,7 @@ int main(int argc, char **argv) {
     }
     for (int i = 0; i < numberOfSequenses ; i++){
         for (int j = 0; j < numberOfSequenses ; j++) {
-            distancesSequential[i][j] = 0;
+            distancesSequential[i][j] = -1;
             //distancesParallel[i][j] = 0;
         }
     }
@@ -178,41 +180,29 @@ int main(int argc, char **argv) {
     clock_t end_ser = clock();
     double serialTimer = 0;
     serialTimer = double (end_ser-start_ser) / double(CLOCKS_PER_SEC);
-    cout << "Elapsed time serial: " << serialTimer << endl;
+    cout << "Elapsed time serial: " << serialTimer << "[s]" << endl;
+
+    for (int i = 0; i < numberOfSequenses ; i++){
+        for (int j = 0; j < numberOfSequenses ; j++) {
+            distancesSequential[i][j] = -1;
+            //distancesParallel[i][j] = 0;
+        }
+    }
 
     // Device allocation
     int sumsSize = sizeof(int)*numberOfSequenses*64;
     h_sums = (int*) malloc(sumsSize);
     cudaMalloc((void**)&d_sums, sumsSize);
 
-
-    const char * c_perms[] = {"AAA", "AAC", "AAT","AAG",
-                              "ACA", "ACC", "ACT","ACG",
-                              "ATA", "ATC", "ATT","ATG",
-                              "AGA", "AGC", "AGT","AGG",
-
-                              "CAA", "CAC", "CAT","CAG",
-                              "CCA", "CCC", "CCT","CCG",
-                              "CTA", "CTC", "CTT","CTG",
-                              "CGA", "CGC", "CGT","CGG",
-
-                              "GAA", "GAC", "GAT","GAG",
-                              "GCA", "GCC", "GCT","GCG",
-                              "GTA", "GTC", "GTT","GTG",
-                              "GGA", "GGC", "GGT","GGG",
-
-                              "TAA", "TAC", "TAT","TAG",
-                              "TCA", "TCC", "TCT","TCG",
-                              "TTA", "TTC", "TTT","TTG",
-                              "TGA", "TGC", "TGT","TGG",
-    };
-    error = cudaMemcpyToSymbol(c_perms, perms, 64 * sizeof(char*) );
+    /* // defining a constant value is passed to the device directly.
+    error = cudaMemcpyToSymbol(c_perms, &perms, 4*64 * sizeof(char) );
     if (error){
-        printf("Errorsti : %d:", error);
+        printf("Errorsti : %d: %s\n", error, cudaGetErrorString(error));
     }
+    */
     error = cudaMemcpyToSymbol(c_size, &permsSize, sizeof(int) );
     if (error){
-        printf("Error %d", error);
+        printf("Error %d: %s", error, cudaGetErrorString(error));
     }
     unsigned long int sizeDistances = numberOfSequenses*numberOfSequenses * sizeof(float);
     string data_aux = join(seqs, "\0");
@@ -315,10 +305,10 @@ void sequentialKmerCount(vector<string> &seqs, vector<string> &permutations , in
     int numberOfSequences = seqs.size();
     // |kmers| is at most 4**k = 4**3 = 64
     int max_combinations = pow(4,k);
-    // Comparing example Ri with i+1 until Rn
+    // Comparing example Ri with R(i+1) until Rn
     for(int i =  0; i < numberOfSequences - 1; i++){
         for(int j = i + 1; j < numberOfSequences; j++){
-            if(i == j)
+            if(i == j || j > i)
                 continue;
             // iterating over permutations (distance of Ri an Rj).
             int minLength = min(seqs[i].size(), seqs[j].size());
@@ -326,8 +316,8 @@ void sequentialKmerCount(vector<string> &seqs, vector<string> &permutations , in
             float distance = -1.0f;
             for(int p = 0; p < max_combinations; p++){
                 int minimum = min(
-                    permutationsCount(permutationsList[p], seqs[i],k),
-                    permutationsCount(permutationsList[p], seqs[j],k)
+                        permutationsCount(permutationsList[p], seqs[i],k),
+                        permutationsCount(permutationsList[p], seqs[j],k)
                 );
                 sum += minimum;
             }

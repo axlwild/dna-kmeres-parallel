@@ -149,7 +149,7 @@ fabric.properties
 ### CUDA ###
 *.i
 *.ii
-*.gpu
+*.gp
 *.ptx
 *.cubin
 *.fatbin
