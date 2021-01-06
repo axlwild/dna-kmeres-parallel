@@ -10,12 +10,18 @@
 #include "cuda.h"
 
 using namespace std;
+
+int numberOfSequenses = 0;
+
+
+
 // Method definition
 void importSeqs(string inputFile);
 void printSeqs();
 void getPermutations(char *str, char* permutations, int last, int index);
 int permutationsCount(string permutation, string sequence, int k);
 void sequentialKmerCount(vector<string> &seqs, vector<string> &permutations , int k);
+void doSequentialKmereDistance();
 // Vectors to store ids and seqs
 vector<string> ids;
 vector<string> seqs;
@@ -101,8 +107,6 @@ string join(const std::vector<std::string> &lst, const std::string &delim){
 __global__ void parallelKDist(char *data, unsigned int *indices, float*distances, unsigned num_strings, int *suma){
     // each block is comparing a sample with others
 
-    if (blockIdx.x == 0 && threadIdx.x == 0)
-        printf("c_perms: %s\n", c_perms[0]);
     int idx = threadIdx.x+blockDim.x*blockIdx.x;
     if (idx < num_strings && blockIdx.x < sizeof(indices) && threadIdx.x < 64){
         // Fase uno: sumamos todos los valores de la suma de los k-meros de cada entrada.
@@ -151,14 +155,11 @@ __global__ void parallelKDist(char *data, unsigned int *indices, float*distances
 int main(int argc, char **argv) {
     //char permutations[len];
     cudaError_t error;
-    int numberOfSequenses = 0;
     // absolute path of the input data
     string file = "/home/acervantes/kmerDist/plants.fasta";
     //string file = "/home/acervantes/all_seqs.fasta";
     importSeqs(file);
 
-    // results files
-    FILE *f_seq = fopen("sequential_results.csv", "w");
     // Reserving memory for results
     numberOfSequenses = seqs.size();
     //printf("%d sequences founded", numberOfSequenses);
@@ -171,23 +172,10 @@ int main(int argc, char **argv) {
     for (int i = 0; i < numberOfSequenses ; i++){
         for (int j = 0; j < numberOfSequenses ; j++) {
             distancesSequential[i][j] = -1;
-            //distancesParallel[i][j] = 0;
         }
     }
 
-    clock_t start_ser = clock();
-    sequentialKmerCount(seqs, permutationsList, 3);
-    clock_t end_ser = clock();
-    double serialTimer = 0;
-    serialTimer = double (end_ser-start_ser) / double(CLOCKS_PER_SEC);
-    cout << "Elapsed time serial: " << serialTimer << "[s]" << endl;
-
-    for (int i = 0; i < numberOfSequenses ; i++){
-        for (int j = 0; j < numberOfSequenses ; j++) {
-            distancesSequential[i][j] = -1;
-            //distancesParallel[i][j] = 0;
-        }
-    }
+    doSequentialKmereDistance();
 
     // Device allocation
     int sumsSize = sizeof(int)*numberOfSequenses*64;
@@ -223,14 +211,14 @@ int main(int argc, char **argv) {
     }
     error = cudaMalloc((void **)&d_indices, sizeof(indexes));
     if (error){
-        printf("Errorsse %d", error);
+        printf("Error malloc %d", error);
     }
     float *h_distances;
     h_distances =(float*) malloc(sizeDistances);
 
     error = cudaMemcpy(d_data, data, data_aux.size(), cudaMemcpyHostToDevice);
     if (error){
-        printf("Error %d", error);
+        printf("Error copying data from host %d", error);
     }
     error = cudaMemcpy(d_indices, indexes, sizeof(indexes), cudaMemcpyHostToDevice);
     if (error){
@@ -257,6 +245,27 @@ int main(int argc, char **argv) {
     cudaFree(d_data);
     cudaFree(d_sums);
     return 0;
+}
+
+void doSequentialKmereDistance(){
+    // results files
+    FILE *f_seq_res = fopen("/home/acervantes/kmerDist/sequential_results.csv", "w");
+    clock_t start_ser = clock();
+    sequentialKmerCount(seqs, permutationsList, 3);
+    clock_t end_ser = clock();
+    double serialTimer = 0;
+    serialTimer = double (end_ser-start_ser) / double(CLOCKS_PER_SEC);
+    cout << "Elapsed time serial: " << serialTimer << "[s]" << endl;
+    for (int i = 0; i < numberOfSequenses ; i++){
+        for (int j = 0; j < numberOfSequenses ; j++) {
+            fprintf(f_seq_res,"%f ",distancesSequential[i][j]);
+            //printf("%f ",distancesSequential[i][j]);
+            //distancesParallel[i][j] = 0;
+        }
+        fprintf(f_seq_res,"\n");
+        //printf("\n");
+    }
+    fclose(f_seq_res);
 }
 
 void importSeqs(string inputFile){
@@ -308,7 +317,7 @@ void sequentialKmerCount(vector<string> &seqs, vector<string> &permutations , in
     // Comparing example Ri with R(i+1) until Rn
     for(int i =  0; i < numberOfSequences - 1; i++){
         for(int j = i + 1; j < numberOfSequences; j++){
-            if(i == j || j > i)
+            if(i >= j)
                 continue;
             // iterating over permutations (distance of Ri an Rj).
             int minLength = min(seqs[i].size(), seqs[j].size());
@@ -316,8 +325,8 @@ void sequentialKmerCount(vector<string> &seqs, vector<string> &permutations , in
             float distance = -1.0f;
             for(int p = 0; p < max_combinations; p++){
                 int minimum = min(
-                        permutationsCount(permutationsList[p], seqs[i],k),
-                        permutationsCount(permutationsList[p], seqs[j],k)
+                        permutationsCount(permutations[p], seqs[i],k),
+                        permutationsCount(permutations[p], seqs[j],k)
                 );
                 sum += minimum;
             }
