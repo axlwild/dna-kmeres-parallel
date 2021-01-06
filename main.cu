@@ -11,8 +11,9 @@
 
 using namespace std;
 
-int numberOfSequenses = 0;
-char *all_seqs;
+int          numberOfSequenses = 0;
+char *       all_seqs;
+unsigned int size_all_seqs = 0;
 
 
 // Method definition
@@ -125,11 +126,11 @@ __global__ void parallelKDist(char *data, int *indices, float*distances, unsigne
         // Podríamos guardar los índices en memoria constante para agilizar la lectura...
         bool is_same_kmere = true;
         char * sequence = data+indices[entry];
-        if(blockIdx.x < 10 && threadIdx.x == 0){
+        /*if(blockIdx.x < 5 && threadIdx.x == 0){
             printf("Entry %d, EntryLength: %d, idx: %d\n", entry, entryLength, indices[entry]);
             printf("indices: %i\n", (int)indices[2]);
             printf("#sequence block %d: %s\n", blockIdx.x, sequence);
-        }
+        }*/
         char currentSubstringFromSample[4];
         for (int i = 0; i < entryLength-3; i++){
             memcpy( currentSubstringFromSample, &sequence[i], 3 );
@@ -218,17 +219,15 @@ int main(int argc, char **argv) {
     int max_indexes = indexes_aux.size();
     int last_data_idx = sizeof(all_seqs) - 1;
     for (int i = 0; i < max_indexes - 1; i++){
-        printf("idx %d: %d\n", i, indexes[i]);
+        //printf("idx %d: %d\n", i, indexes[i]);
         int entryLength = (i != max_indexes -1)  ? indexes[i + 1] -  indexes[i] - 1 : sizeof(all_seqs) - (indexes[i]);
         const char * sequence = all_seqs+indexes[i] ;
-        printf("sequence size %d: %sº\n", entryLength, sequence);
+        //printf("sequence size %d: %s\n", entryLength, sequence);
     }
 
-    return 0;
-
     //std::copy(indexes_aux.begin(), indexes_aux.end(), indexes);
-
-    cudaMalloc((void **)&d_data, data_aux.size());
+    //int size_seqs = sizeof(all_seqs) * sizeof(char);
+    cudaMalloc((void **)&d_data, size_all_seqs);
     error = cudaMalloc((void **)&d_distances, sizeDistances);
     if (error){
         printf("Error al usar memoria con distancia %d ::", error);
@@ -242,8 +241,7 @@ int main(int argc, char **argv) {
     }
     float *h_distances;
     h_distances =(float*) malloc(sizeDistances);
-
-    error = cudaMemcpy(d_data, data, data_aux.size(), cudaMemcpyHostToDevice);
+    error = cudaMemcpy(d_data, all_seqs, size_all_seqs, cudaMemcpyHostToDevice);
     if (error){
         printf("Error copying data from host %d", error);
     }
@@ -359,7 +357,8 @@ void importSeqs(string inputFile){
         }
     }
     int last_index = indexes_aux.size();
-    all_seqs = (char *) malloc(globalAcc.size()*sizeof(char));
+    size_all_seqs = globalAcc.size()*sizeof(char);
+    all_seqs = (char *) malloc(size_all_seqs);
     for(int i = 0; i < globalAcc.size(); i++){
         if (globalAcc[i] == '|'){
             all_seqs[i] = '\0';
