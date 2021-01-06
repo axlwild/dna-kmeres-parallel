@@ -12,7 +12,7 @@
 using namespace std;
 
 int numberOfSequenses = 0;
-
+char *all_seqs;
 
 
 // Method definition
@@ -29,7 +29,7 @@ vector<int> indexes_aux;
 
 // Device variables.
 char * d_data; // all the strings.
-unsigned int * d_indices;
+int * d_indices;
 float * d_distances;
 const char * data;
 
@@ -104,24 +104,32 @@ string join(const std::vector<std::string> &lst, const std::string &delim){
     return ret;
 }
 
-__global__ void parallelKDist(char *data, unsigned int *indices, float*distances, unsigned num_strings, int *suma){
+__global__ void parallelKDist(char *data, int *indices, float*distances, unsigned num_seqs, int *suma){
     // each block is comparing a sample with others
-
-    int idx = threadIdx.x+blockDim.x*blockIdx.x;
-    if (idx < num_strings && blockIdx.x < sizeof(indices) && threadIdx.x < 64){
+    //int idx = threadIdx.x+blockDim.x*blockIdx.x;
+    __shared__ int entry;
+    //printf("outside blockid: %d \n", blockIdx.x);
+    if (blockIdx.x < (int)sizeof(indices) && threadIdx.x <= 64){
+        entry = blockIdx.x;
+        __syncthreads();
         // Fase uno: sumamos todos los valores de la suma de los k-meros de cada entrada.
         // Cada bloque se encarga de calcular la suma de cada entrada
-        int entry = blockIdx.x;
         // Cada hilo se encarga de sumar cada permutación.
         // en suma guardamos las apariciones de las 64 posibles combinaciones.
         // Si cada hilo se encargara de cada k-mero no habría por qué hacer la operación atómica.
         const char *currentKmere = c_perms[threadIdx.x];
         // Entonces cada hilo tendría que iterar toda la muestra solo una vez para calcular la suma.
         int entryLength = indices[entry + 1] -  indices[entry];
+
         // entonces iteramos por cada letra de la entrada hasta la N-k (los índices).
         // Podríamos guardar los índices en memoria constante para agilizar la lectura...
         bool is_same_kmere = true;
         char * sequence = data+indices[entry];
+        if(blockIdx.x < 10 && threadIdx.x == 0){
+            printf("Entry %d, EntryLength: %d, idx: %d\n", entry, entryLength, indices[entry]);
+            printf("indices: %i\n", (int)indices[2]);
+            printf("#sequence block %d: %s\n", blockIdx.x, sequence);
+        }
         char currentSubstringFromSample[4];
         for (int i = 0; i < entryLength-3; i++){
             memcpy( currentSubstringFromSample, &sequence[i], 3 );
@@ -142,17 +150,24 @@ __global__ void parallelKDist(char *data, unsigned int *indices, float*distances
         // Sumamos los mínimos de las cadenas comparadas.
         __syncthreads();
         int nextEntryLength;
-        for(int j = entry + 1; j < num_strings - 1; j++){
+        for(int j = entry + 1; j < num_seqs - 1; j++){
             nextEntryLength = indices[j + 1] -  indices[j];
             distances[entry*threadIdx.x+j] = 1 - min(suma[entry*blockDim.x+threadIdx.x],suma[j*blockDim.x+threadIdx.x])/ (min(nextEntryLength, entryLength) -3 + 1);
-
         }
+    }
+    else{
+
     }
 
 
 }
 
 int main(int argc, char **argv) {
+
+    //    const char* prueba = "Esto\00Es\00Una\00Prueba";
+    //    std::cout << prueba;
+    //    return;
+
     //char permutations[len];
     cudaError_t error;
     // absolute path of the input data
@@ -175,7 +190,7 @@ int main(int argc, char **argv) {
         }
     }
 
-    doSequentialKmereDistance();
+    //doSequentialKmereDistance();
 
     // Device allocation
     int sumsSize = sizeof(int)*numberOfSequenses*64;
@@ -195,11 +210,22 @@ int main(int argc, char **argv) {
     unsigned long int sizeDistances = numberOfSequenses*numberOfSequenses * sizeof(float);
     string data_aux = join(seqs, "\0");
     data = data_aux.c_str();
-    int indexes[indexes_aux.size()];
-    //indexes = (int * ) malloc(indexes_aux.size() * sizeof(int));
+    //int indexes[indexes_aux.size()];
+    int *indexes = (int *) malloc((int)indexes_aux.size() * sizeof(int));
     for (int i = 0; i < indexes_aux.size(); i++){
         indexes[i] = indexes_aux[i];
     }
+    int max_indexes = indexes_aux.size();
+    int last_data_idx = sizeof(all_seqs) - 1;
+    for (int i = 0; i < max_indexes - 1; i++){
+        printf("idx %d: %d\n", i, indexes[i]);
+        int entryLength = (i != max_indexes -1)  ? indexes[i + 1] -  indexes[i] - 1 : sizeof(all_seqs) - (indexes[i]);
+        const char * sequence = all_seqs+indexes[i] ;
+        printf("sequence size %d: %sº\n", entryLength, sequence);
+    }
+
+    return 0;
+
     //std::copy(indexes_aux.begin(), indexes_aux.end(), indexes);
 
     cudaMalloc((void **)&d_data, data_aux.size());
@@ -209,7 +235,8 @@ int main(int argc, char **argv) {
         cout << sizeDistances << endl;
         return 0;
     }
-    error = cudaMalloc((void **)&d_indices, sizeof(indexes));
+    int indexesBytesSize = sizeof(indexes)*sizeof(int);
+    error = cudaMalloc((void **)&d_indices, indexesBytesSize);
     if (error){
         printf("Error malloc %d", error);
     }
@@ -222,15 +249,18 @@ int main(int argc, char **argv) {
     }
     error = cudaMemcpy(d_indices, indexes, sizeof(indexes), cudaMemcpyHostToDevice);
     if (error){
-        printf("Errorsa %d\n", error);
+        printf("Error copying data from device %d\n", error);
     }
-    int blocks = ceil(seqs.size() / 1024) + 1;
-    int threads = 1024;
+    //int blocks = ceil(seqs.size() / 1024) + 1;
+    //int threads = 1024;
+    int blocks = 10;
+    int threads = 64;
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
     cudaEventRecord(start,0);
     // Launch kernel
+    printf("Running %d blocks and %d threads\n", blocks, threads);
     parallelKDist<<<blocks, threads>>>(d_data, d_indices, d_distances, numberOfSequenses, d_sums);
     cudaEventRecord(stop,0);
     cudaEventSynchronize(stop);
@@ -238,6 +268,13 @@ int main(int argc, char **argv) {
     cudaEventElapsedTime(&parallelTimer, start, stop);
     cout<< "Elapsed parallel timer: " << parallelTimer << " ms, " << parallelTimer / 1000 << " secs" <<endl;
     cudaMemcpy(h_distances, d_distances, sizeDistances, cudaMemcpyDeviceToHost);
+    /*
+    for(int i = 0, idx = 0; i < numberOfSequenses; i++){
+        for(int j = 0; j < numberOfSequenses; j++){
+            printf("%f", h_distances[idx++]);
+        }
+        printf("\n");
+    }*/
     free(distancesSequential);
     //free(distancesParallel);
     cudaFree(d_distances);
@@ -275,10 +312,11 @@ void importSeqs(string inputFile){
         std::cerr << "Error opening: " << inputFile << " . Check your file or pathh." << std::endl;
         exit(0);
     }
-
     string line;
-
+    string acc = "";
+    string globalAcc = "";
     bool newSeq = false;
+
     // Iterate over all secuences
     while (getline(input, line)) {
 
@@ -287,26 +325,49 @@ void importSeqs(string inputFile){
         if(line.empty()){
             continue;
         }
-
         //read the header of
         if (line[0] == '>') {
             // store id
             ids.push_back(line);
             newSeq = true;
+            continue;
         }
-        else {
-            if (newSeq) {
-                seqs.push_back(line);
-                indexes_aux.push_back(indexCounter);
-                indexCounter += line.size();
-                newSeq = false;
+        if (newSeq) {
+            newSeq = false;
+            acc = line;
+            while (getline(input, line)) {
+                if(line.empty() ){
+                    acc += "|";
+                    seqs.push_back(acc);
+                    indexes_aux.push_back(indexCounter);
+                    indexCounter += acc.size();
+                    globalAcc += acc;
+                    acc = "";
+                    break;
+                }
+                acc += line;
             }
-            else
-                line += line;
-            // store seqs
-
+            if (acc != ""){
+                acc += "|";
+                seqs.push_back(acc);
+                indexes_aux.push_back(indexCounter);
+                indexCounter += acc.size();
+                globalAcc += acc;
+                acc = "";
+                indexes_aux.push_back(indexCounter);
+            }
         }
     }
+    int last_index = indexes_aux.size();
+    all_seqs = (char *) malloc(globalAcc.size()*sizeof(char));
+    for(int i = 0; i < globalAcc.size(); i++){
+        if (globalAcc[i] == '|'){
+            all_seqs[i] = '\0';
+            continue;
+        }
+        all_seqs[i] = globalAcc[i];
+    }
+    return;
 }
 
 void sequentialKmerCount(vector<string> &seqs, vector<string> &permutations , int k){
