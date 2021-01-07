@@ -8,6 +8,7 @@
 #include <sstream>
 #include <typeinfo>
 #include "cuda.h"
+#include <cooperative_groups.h>
 
 using namespace std;
 
@@ -29,13 +30,10 @@ vector<string> seqs;
 vector<int> indexes_aux;
 
 // Device variables.
-char * d_data; // all the strings.
-int * d_indices;
-float * d_distances;
-const char * data;
-
-// coincidences of k-mer on each input
-int * d_sums;
+char    * d_data; // all the strings.
+int     * d_indices;
+float   * d_distances;
+int * d_sums; // coincidences of k-mer on each input
 int * h_sums;
 
 // number of permutations of RNA K_meres and k-value
@@ -109,6 +107,8 @@ __global__ void parallelKDist(char *data, int *indices, float*distances, unsigne
     // each block is comparing a sample with others
     //int idx = threadIdx.x+blockDim.x*blockIdx.x;
     __shared__ int entry;
+    // Each thread count all coincidences of a k-mere combination.
+    int k_mere = threadIdx.x;
     //printf("outside blockid: %d \n", blockIdx.x);
     if (blockIdx.x < (int)sizeof(indices) && threadIdx.x <= 64){
         entry = blockIdx.x;
@@ -118,7 +118,7 @@ __global__ void parallelKDist(char *data, int *indices, float*distances, unsigne
         // Cada hilo se encarga de sumar cada permutación.
         // en suma guardamos las apariciones de las 64 posibles combinaciones.
         // Si cada hilo se encargara de cada k-mero no habría por qué hacer la operación atómica.
-        const char *currentKmere = c_perms[threadIdx.x];
+        const char *currentKmere = c_perms[k_mere];
         // Entonces cada hilo tendría que iterar toda la muestra solo una vez para calcular la suma.
         int entryLength = indices[entry + 1] -  indices[entry];
 
@@ -127,11 +127,15 @@ __global__ void parallelKDist(char *data, int *indices, float*distances, unsigne
         bool is_same_kmere = true;
         char * sequence = data+indices[entry];
         /*if(blockIdx.x < 5 && threadIdx.x == 0){
+            printf("Block #%d\tIndex: %d\tEntry:%d\nAll data inside: %s\n", blockIdx.x , indices[entry], entry, sequence);
             printf("Entry %d, EntryLength: %d, idx: %d\n", entry, entryLength, indices[entry]);
             printf("indices: %i\n", (int)indices[2]);
             printf("#sequence block %d: %s\n", blockIdx.x, sequence);
         }*/
         char currentSubstringFromSample[4];
+        if(blockIdx.x == 0 && threadIdx.x == 0){
+            printf("current string: %s\n", sequence);
+        }
         for (int i = 0; i < entryLength-3; i++){
             memcpy( currentSubstringFromSample, &sequence[i], 3 );
             currentSubstringFromSample[3] = '\0';
@@ -190,13 +194,17 @@ int main(int argc, char **argv) {
             distancesSequential[i][j] = -1;
         }
     }
-
-    //doSequentialKmereDistance();
+    doSequentialKmereDistance();
 
     // Device allocation
-    int sumsSize = sizeof(int)*numberOfSequenses*64;
+    int numResults = numberOfSequenses*numberOfSequenses*64;
+    int sumsSize = sizeof(int)*numResults;
     h_sums = (int*) malloc(sumsSize);
+    for (int i = 0; i < numResults; i++){
+        h_sums[i] = -1;
+    }
     cudaMalloc((void**)&d_sums, sumsSize);
+
 
     /* // defining a constant value is passed to the device directly.
     error = cudaMemcpyToSymbol(c_perms, &perms, 4*64 * sizeof(char) );
@@ -210,7 +218,6 @@ int main(int argc, char **argv) {
     }
     unsigned long int sizeDistances = numberOfSequenses*numberOfSequenses * sizeof(float);
     string data_aux = join(seqs, "\0");
-    data = data_aux.c_str();
     //int indexes[indexes_aux.size()];
     int *indexes = (int *) malloc((int)indexes_aux.size() * sizeof(int));
     for (int i = 0; i < indexes_aux.size(); i++){
@@ -245,7 +252,11 @@ int main(int argc, char **argv) {
     if (error){
         printf("Error copying data from host %d", error);
     }
-    error = cudaMemcpy(d_indices, indexes, sizeof(indexes), cudaMemcpyHostToDevice);
+    error = cudaMemcpy(d_sums, h_sums, sumsSize, cudaMemcpyHostToDevice);
+    if (error){
+        printf("Error copying data from host %d", error);
+    }
+    error = cudaMemcpy(d_indices, indexes, indexesBytesSize, cudaMemcpyHostToDevice);
     if (error){
         printf("Error copying data from device %d\n", error);
     }
@@ -266,13 +277,13 @@ int main(int argc, char **argv) {
     cudaEventElapsedTime(&parallelTimer, start, stop);
     cout<< "Elapsed parallel timer: " << parallelTimer << " ms, " << parallelTimer / 1000 << " secs" <<endl;
     cudaMemcpy(h_distances, d_distances, sizeDistances, cudaMemcpyDeviceToHost);
-    /*
+
     for(int i = 0, idx = 0; i < numberOfSequenses; i++){
         for(int j = 0; j < numberOfSequenses; j++){
-            printf("%f", h_distances[idx++]);
+            printf("%f ", h_distances[idx++]);
         }
         printf("\n");
-    }*/
+    }
     free(distancesSequential);
     //free(distancesParallel);
     cudaFree(d_distances);
