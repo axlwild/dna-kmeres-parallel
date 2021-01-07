@@ -38,47 +38,47 @@ int * h_sums;
 
 // number of permutations of RNA K_meres and k-value
 __constant__ char c_perms[64][4] = {
-    "AAA", "AAC", "AAT","AAG",
-    "ACA", "ACC", "ACT","ACG",
-    "ATA", "ATC", "ATT","ATG",
-    "AGA", "AGC", "AGT","AGG",
+    "AAA", "AAC", "AAG","AAT",
+    "ACA", "ACC", "ACG","ACT",
+    "AGA", "AGC", "AGG", "AGT",
+    "ATA", "ATC", "ATG", "ATT",
 
-    "CAA", "CAC", "CAT","CAG",
-    "CCA", "CCC", "CCT","CCG",
-    "CTA", "CTC", "CTT","CTG",
-    "CGA", "CGC", "CGT","CGG",
+    "CAA", "CAC", "CAG", "CAT",
+    "CCA", "CCC", "CCG", "CCT",
+    "CGA", "CGC", "CGG", "CGT",
+    "CTA", "CTC", "CTG", "CTT",
 
-    "GAA", "GAC", "GAT","GAG",
-    "GCA", "GCC", "GCT","GCG",
-    "GTA", "GTC", "GTT","GTG",
-    "GGA", "GGC", "GGT","GGG",
+    "GAA", "GAC", "GAG", "GAT",
+    "GCA", "GCC", "GCG", "GCT",
+    "GGA", "GGC", "GGG", "GGT",
+    "GTA", "GTC", "GTG", "GTT",
 
-    "TAA", "TAC", "TAT","TAG",
-    "TCA", "TCC", "TCT","TCG",
-    "TTA", "TTC", "TTT","TTG",
-    "TGA", "TGC", "TGT","TGG",
+    "TAA", "TAC", "TAG", "TAT",
+    "TCA", "TCC", "TCG", "TCT",
+    "TGA", "TGC", "TGG", "TGT",
+    "TTA", "TTC", "TTG", "TTT",
 };
 __constant__ int  c_size ;
 char perms[64][4] = {
-                        "AAA", "AAC", "AAT","AAG",
-                        "ACA", "ACC", "ACT","ACG",
-                        "ATA", "ATC", "ATT","ATG",
-                        "AGA", "AGC", "AGT","AGG",
+        "AAA", "AAC", "AAG","AAT",
+        "ACA", "ACC", "ACG","ACT",
+        "AGA", "AGC", "AGG", "AGT",
+        "ATA", "ATC", "ATG", "ATT",
 
-                        "CAA", "CAC", "CAT","CAG",
-                        "CCA", "CCC", "CCT","CCG",
-                        "CTA", "CTC", "CTT","CTG",
-                        "CGA", "CGC", "CGT","CGG",
+        "CAA", "CAC", "CAG", "CAT",
+        "CCA", "CCC", "CCG", "CCT",
+        "CGA", "CGC", "CGG", "CGT",
+        "CTA", "CTC", "CTG", "CTT",
 
-                        "GAA", "GAC", "GAT","GAG",
-                        "GCA", "GCC", "GCT","GCG",
-                        "GTA", "GTC", "GTT","GTG",
-                        "GGA", "GGC", "GGT","GGG",
+        "GAA", "GAC", "GAG", "GAT",
+        "GCA", "GCC", "GCG", "GCT",
+        "GGA", "GGC", "GGG", "GGT",
+        "GTA", "GTC", "GTG", "GTT",
 
-                        "TAA", "TAC", "TAT","TAG",
-                        "TCA", "TCC", "TCT","TCG",
-                        "TTA", "TTC", "TTT","TTG",
-                        "TGA", "TGC", "TGT","TGG",
+        "TAA", "TAC", "TAG", "TAT",
+        "TCA", "TCC", "TCG", "TCT",
+        "TGA", "TGC", "TGG", "TGT",
+        "TTA", "TTC", "TTG", "TTT",
 };
 int permsSize = sizeof(perms) ;
 
@@ -102,69 +102,55 @@ string join(const std::vector<std::string> &lst, const std::string &delim){
     }
     return ret;
 }
-
-__global__ void parallelKDist(char *data, int *indices, float*distances, unsigned num_seqs, int *suma){
+/**
+ *
+ * @param data:    buffer con todas las cadenas
+ * @param indices: índices donde inicia cada cadena nueva en los datos
+ * @param distances: matriz resultante de las distancias
+ * @param num_seqs: número de cadenas de entrada.
+ * @param suma: Matriz de rxc donde cada renglón equivale a las coincidencias de cada k-mero
+ *              en una cadena de entrada (columna).
+ */
+__global__ void sumKmereCoincidences(char *data, int *indices, unsigned num_seqs, int *sum){
     // each block is comparing a sample with others
     //int idx = threadIdx.x+blockDim.x*blockIdx.x;
     __shared__ int entry;
     // Each thread count all coincidences of a k-mere combination.
     int k_mere = threadIdx.x;
+    int idx    = blockIdx.x * blockDim.x + threadIdx.x;
     //printf("outside blockid: %d \n", blockIdx.x);
-    if (blockIdx.x < (int)sizeof(indices) && threadIdx.x <= 64){
+    if (blockIdx.x < num_seqs && threadIdx.x <= 64){
         entry = blockIdx.x;
         __syncthreads();
         // Fase uno: sumamos todos los valores de la suma de los k-meros de cada entrada.
-        // Cada bloque se encarga de calcular la suma de cada entrada
+        // Cada bloque se encarga de cada cadena de entrada
         // Cada hilo se encarga de sumar cada permutación.
-        // en suma guardamos las apariciones de las 64 posibles combinaciones.
-        // Si cada hilo se encargara de cada k-mero no habría por qué hacer la operación atómica.
         const char *currentKmere = c_perms[k_mere];
         // Entonces cada hilo tendría que iterar toda la muestra solo una vez para calcular la suma.
         int entryLength = indices[entry + 1] -  indices[entry];
-
         // entonces iteramos por cada letra de la entrada hasta la N-k (los índices).
         // Podríamos guardar los índices en memoria constante para agilizar la lectura...
         bool is_same_kmere = true;
         char * sequence = data+indices[entry];
-        /*if(blockIdx.x < 5 && threadIdx.x == 0){
-            printf("Block #%d\tIndex: %d\tEntry:%d\nAll data inside: %s\n", blockIdx.x , indices[entry], entry, sequence);
-            printf("Entry %d, EntryLength: %d, idx: %d\n", entry, entryLength, indices[entry]);
-            printf("indices: %i\n", (int)indices[2]);
-            printf("#sequence block %d: %s\n", blockIdx.x, sequence);
-        }*/
         char currentSubstringFromSample[4];
-        if(blockIdx.x == 0 && threadIdx.x == 0){
-            printf("current string: %s\n", sequence);
-        }
         for (int i = 0; i < entryLength-3; i++){
             memcpy( currentSubstringFromSample, &sequence[i], 3 );
             currentSubstringFromSample[3] = '\0';
             is_same_kmere = true;
             for(int j = 0; j < 3; j++){
-                if (sequence[j] == currentKmere[j]){
+                if (currentSubstringFromSample[j] == currentKmere[j]){
                     continue;
                 }
                 is_same_kmere = false;
                 break;
             }
             if(is_same_kmere){
-                suma[entry*blockDim.x+threadIdx.x] += 1;
+                //printf("Idx: %d: %d\n", idx, sum[idx]);
+                //printf("|");
+                sum[idx] += 1;
             }
         }
-        // Fase dos.
-        // Sumamos los mínimos de las cadenas comparadas.
-        __syncthreads();
-        int nextEntryLength;
-        for(int j = entry + 1; j < num_seqs - 1; j++){
-            nextEntryLength = indices[j + 1] -  indices[j];
-            distances[entry*threadIdx.x+j] = 1 - min(suma[entry*blockDim.x+threadIdx.x],suma[j*blockDim.x+threadIdx.x])/ (min(nextEntryLength, entryLength) -3 + 1);
-        }
     }
-    else{
-
-    }
-
-
 }
 
 int main(int argc, char **argv) {
@@ -197,11 +183,11 @@ int main(int argc, char **argv) {
     doSequentialKmereDistance();
 
     // Device allocation
-    int numResults = numberOfSequenses*numberOfSequenses*64;
-    int sumsSize = sizeof(int)*numResults;
+    int numSumResults = numberOfSequenses*64; // sequences x 4**3
+    int sumsSize = sizeof(int)*numSumResults;
     h_sums = (int*) malloc(sumsSize);
-    for (int i = 0; i < numResults; i++){
-        h_sums[i] = -1;
+    for (int i = 0, idx = 0; i < numSumResults; i++){
+        h_sums[i] = 0;
     }
     cudaMalloc((void**)&d_sums, sumsSize);
 
@@ -241,7 +227,7 @@ int main(int argc, char **argv) {
         cout << sizeDistances << endl;
         return 0;
     }
-    int indexesBytesSize = sizeof(indexes)*sizeof(int);
+    int indexesBytesSize = indexes_aux.size()*sizeof(int);
     error = cudaMalloc((void **)&d_indices, indexesBytesSize);
     if (error){
         printf("Error malloc %d", error);
@@ -270,20 +256,24 @@ int main(int argc, char **argv) {
     cudaEventRecord(start,0);
     // Launch kernel
     printf("Running %d blocks and %d threads\n", blocks, threads);
-    parallelKDist<<<blocks, threads>>>(d_data, d_indices, d_distances, numberOfSequenses, d_sums);
+    sumKmereCoincidences<<<blocks, threads>>>(d_data, d_indices, numberOfSequenses, d_sums);
     cudaEventRecord(stop,0);
     cudaEventSynchronize(stop);
     float parallelTimer = 0;
     cudaEventElapsedTime(&parallelTimer, start, stop);
     cout<< "Elapsed parallel timer: " << parallelTimer << " ms, " << parallelTimer / 1000 << " secs" <<endl;
-    cudaMemcpy(h_distances, d_distances, sizeDistances, cudaMemcpyDeviceToHost);
+    //cudaMemcpy(h_distances, d_distances, sizeDistances, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_sums, d_sums, sumsSize, cudaMemcpyDeviceToHost);
 
-    for(int i = 0, idx = 0; i < numberOfSequenses; i++){
-        for(int j = 0; j < numberOfSequenses; j++){
-            printf("%f ", h_distances[idx++]);
+    printf("Sums:\n");
+    for(int j = 0, idx = 0; j < 64; j++){
+        printf("%d: ", j);
+        for(int i = 0; i < numberOfSequenses; i++){
+            printf("%d,\t", h_sums[idx++]);
         }
         printf("\n");
     }
+
     free(distancesSequential);
     //free(distancesParallel);
     cudaFree(d_distances);
