@@ -9,9 +9,10 @@
 #include <typeinfo>
 #include "cuda.h"
 #include <cooperative_groups.h>
+#include <limits.h>
 
 using namespace std;
-
+#define PERMS_KMERES 64
 int          numberOfSequenses = 0;
 char *       all_seqs;
 unsigned int size_all_seqs = 0;
@@ -147,11 +148,101 @@ __global__ void sumKmereCoincidences(char *data, int *indices, unsigned num_seqs
             if(is_same_kmere){
                 //printf("Idx: %d: %d\n", idx, sum[idx]);
                 //printf("|");
+                // TODO: intentar usar otro tipo de memoria y pasar al final el resultado final a la matriz de resultados
                 sum[idx] += 1;
             }
         }
     }
 }
+/*
+__global__ void minKmerzeDist(int *sums, double *distances, int num_seqs, double *mins){
+    // Cada bloque se encargará de calcular un k-mero
+    // Los hilos distribuirán la tarea de calcular el mínimo entre las entradas.
+    // Distances poddría ser una matriz triangular o podría ser un arreglo cuyo acceso sea por una función
+    // hash para ahorrar memoria.
+
+    // En el bloque comparamos todas las coincidencias con los k-meros
+    int current_kmere = blockIdx.x;
+    int current_seq   = threadIdx.x;
+    int idx           = blockIdx.x*blockDim.x+threadIdx.x;
+    int comparisons   = current_seq - num_seqs;
+    int min           = INT_MAX;
+    // TODO: caso para más de 1024 entradas, se necesita seguir ejecutando hasta que todas las entradas se puedan comparar
+    if(current_seq < num_seqs - 1){
+        // Cada iteración es la comparación desde la secuencia 'start' hasta la última.
+        for(int start = 0; start < num_seqs - 1; start++){
+            //Se calculan los mínimos de una entrada contra las restantes
+             if (start < current_seq)
+                min = (sums[idx+start] < sums[idx + start + current_seq + 1]) ? sums[idx+start] : sums[idx + start + current_seq + 1];
+            __syncthreads();
+
+        }
+    }
+    __syncthreads();
+
+    mins[idx] =
+
+}*/
+
+// extracted and modified from MK Programming Massively. 2nd Edition p.209
+__global__ void parallelSum(float *results, int idxResult, int InputSize) {
+    __shared__ int XY[PERMS_KMERES];
+    extern __shared__ int min_sums[];
+    int i = blockIdx.x*blockDim.x + threadIdx.x;
+    if (i < InputSize) {
+        XY[threadIdx.x] = min_sums[i];
+    }
+    for (unsigned int stride = 1; stride < blockDim.x; stride *= 2) {
+        __syncthreads();
+        int index = (threadIdx.x+1) * 2* stride -1;
+        if (index < blockDim.x) {
+            XY[index] += XY[index - stride];
+        }
+    }
+    for (int stride = PERMS_KMERES/4; stride > 0; stride /= 2) {
+        __syncthreads();
+        int index = (threadIdx.x+1)*stride*2 - 1;
+        if(index + stride < PERMS_KMERES) {
+            XY[index + stride] += XY[index];
+        }
+    }
+    __syncthreads();
+    if (i == 0)
+        results[idxResult] = XY[InputSize-1];
+}
+
+__global__ void minKmereDist(int *sums, float *distances, int num_seqs, int start){
+    int current_seq   = blockIdx.x;
+    int idx           = current_seq+blockDim.x*threadIdx.x;
+    int idxDist       = start*blockDim.x+current_seq;
+    int min_sums[PERMS_KMERES] = {0};
+    // Se guarda en memoria compartida las repeticiones de los kmeros de las dos entradas a comparar.
+    __shared__ int seqs_sums[PERMS_KMERES*2];
+    //TODO: ¿la variable totalsum pueden verlos los demás bloques?
+    //int totalSum;
+
+    if(current_seq < num_seqs - 1){
+
+        for(int i = 0, j=0; i < PERMS_KMERES; i++){
+            seqs_sums[j++]   = sums[idx];
+            seqs_sums[j++]   = sums[idx+1];
+        }
+        __syncthreads();
+        for(int i = 0; i < PERMS_KMERES; i++){
+            if (seqs_sums[2*i] < seqs_sums[2*i+1]){
+                min_sums[i] += seqs_sums[2*i];
+            }
+            else{
+                printf("");
+                min_sums[i] += seqs_sums[2*i+1];
+            }
+        }
+        __syncthreads();
+        //parallelSum<<<1,64>>>(distances,idxDist+1, PERMS_KMERES);
+    }
+
+}
+
 
 int main(int argc, char **argv) {
 
@@ -163,9 +254,8 @@ int main(int argc, char **argv) {
     cudaError_t error;
     // absolute path of the input data
     string file = "/home/acervantes/kmerDist/plants.fasta";
-    //string file = "/home/acervantes/all_seqs.fasta";
+    //string file = "/home/acervantes/kmerDist/all_seqs.fasta";
     importSeqs(file);
-
     // Reserving memory for results
     numberOfSequenses = seqs.size();
     //printf("%d sequences founded", numberOfSequenses);
@@ -180,13 +270,13 @@ int main(int argc, char **argv) {
             distancesSequential[i][j] = -1;
         }
     }
-    doSequentialKmereDistance();
+    //doSequentialKmereDistance(); return 0;
 
     // Device allocation
     int numSumResults = numberOfSequenses*64; // sequences x 4**3
     int sumsSize = sizeof(int)*numSumResults;
     h_sums = (int*) malloc(sumsSize);
-    for (int i = 0, idx = 0; i < numSumResults; i++){
+    for (int i = 0; i < numSumResults; i++){
         h_sums[i] = 0;
     }
     cudaMalloc((void**)&d_sums, sumsSize);
@@ -210,13 +300,13 @@ int main(int argc, char **argv) {
         indexes[i] = indexes_aux[i];
     }
     int max_indexes = indexes_aux.size();
-    int last_data_idx = sizeof(all_seqs) - 1;
-    for (int i = 0; i < max_indexes - 1; i++){
+    //int last_data_idx = sizeof(all_seqs) - 1;
+    //for (int i = 0; i < max_indexes - 1; i++){
         //printf("idx %d: %d\n", i, indexes[i]);
-        int entryLength = (i != max_indexes -1)  ? indexes[i + 1] -  indexes[i] - 1 : sizeof(all_seqs) - (indexes[i]);
-        const char * sequence = all_seqs+indexes[i] ;
+        //int entryLength = (i != max_indexes -1)  ? indexes[i + 1] -  indexes[i] - 1 : sizeof(all_seqs) - (indexes[i]);
+        //const char * sequence = all_seqs+indexes[i] ;
         //printf("sequence size %d: %s\n", entryLength, sequence);
-    }
+    //}
 
     //std::copy(indexes_aux.begin(), indexes_aux.end(), indexes);
     //int size_seqs = sizeof(all_seqs) * sizeof(char);
@@ -234,6 +324,10 @@ int main(int argc, char **argv) {
     }
     float *h_distances;
     h_distances =(float*) malloc(sizeDistances);
+    int dimsDistances = numberOfSequenses*numberOfSequenses;
+    for(int i=0; i<dimsDistances; i++){
+        h_distances[i] = 0;
+    }
     error = cudaMemcpy(d_data, all_seqs, size_all_seqs, cudaMemcpyHostToDevice);
     if (error){
         printf("Error copying data from host %d", error);
@@ -242,14 +336,18 @@ int main(int argc, char **argv) {
     if (error){
         printf("Error copying data from host %d", error);
     }
+    error = cudaMemcpy(d_distances, h_distances, sizeDistances, cudaMemcpyHostToDevice);
+    if (error){
+        printf("Error copying distances matrix from host %d", error);
+    }
     error = cudaMemcpy(d_indices, indexes, indexesBytesSize, cudaMemcpyHostToDevice);
     if (error){
         printf("Error copying data from device %d\n", error);
     }
-    //int blocks = ceil(seqs.size() / 1024) + 1;
-    //int threads = 1024;
-    int blocks = 10;
     int threads = 64;
+    int blocks = numberOfSequenses;
+    //int blocks = 10;
+    //int threads = 64;
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
@@ -257,6 +355,11 @@ int main(int argc, char **argv) {
     // Launch kernel
     printf("Running %d blocks and %d threads\n", blocks, threads);
     sumKmereCoincidences<<<blocks, threads>>>(d_data, d_indices, numberOfSequenses, d_sums);
+    minKmereDist<<<10, 1024>>>(d_sums,d_distances, numberOfSequenses, 0);
+    cudaError_t err_;
+    cudaDeviceSynchronize();
+    err_ = cudaGetLastError();
+    printf("LastError: %d\n", err_);
     cudaEventRecord(stop,0);
     cudaEventSynchronize(stop);
     float parallelTimer = 0;
@@ -264,15 +367,14 @@ int main(int argc, char **argv) {
     cout<< "Elapsed parallel timer: " << parallelTimer << " ms, " << parallelTimer / 1000 << " secs" <<endl;
     //cudaMemcpy(h_distances, d_distances, sizeDistances, cudaMemcpyDeviceToHost);
     cudaMemcpy(h_sums, d_sums, sumsSize, cudaMemcpyDeviceToHost);
-
-    printf("Sums:\n");
+    /*printf("Sums:\n");
     for(int j = 0, idx = 0; j < 64; j++){
         printf("%d: ", j);
         for(int i = 0; i < numberOfSequenses; i++){
             printf("%d,\t", h_sums[idx++]);
         }
         printf("\n");
-    }
+    }*/
 
     free(distancesSequential);
     //free(distancesParallel);
