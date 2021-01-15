@@ -35,29 +35,31 @@ char    * d_data; // all the strings.
 int     * d_indices;
 float   * d_distances;
 int * d_sums; // coincidences of k-mer on each input
+int * d_mins, *h_mins;
 int * h_sums;
+int minsSize;
 
 // number of permutations of RNA K_meres and k-value
 __constant__ char c_perms[64][4] = {
-    "AAA", "AAC", "AAG","AAT",
-    "ACA", "ACC", "ACG","ACT",
-    "AGA", "AGC", "AGG", "AGT",
-    "ATA", "ATC", "ATG", "ATT",
+        "AAA", "AAC", "AAG","AAT",
+        "ACA", "ACC", "ACG","ACT",
+        "AGA", "AGC", "AGG", "AGT",
+        "ATA", "ATC", "ATG", "ATT",
 
-    "CAA", "CAC", "CAG", "CAT",
-    "CCA", "CCC", "CCG", "CCT",
-    "CGA", "CGC", "CGG", "CGT",
-    "CTA", "CTC", "CTG", "CTT",
+        "CAA", "CAC", "CAG", "CAT",
+        "CCA", "CCC", "CCG", "CCT",
+        "CGA", "CGC", "CGG", "CGT",
+        "CTA", "CTC", "CTG", "CTT",
 
-    "GAA", "GAC", "GAG", "GAT",
-    "GCA", "GCC", "GCG", "GCT",
-    "GGA", "GGC", "GGG", "GGT",
-    "GTA", "GTC", "GTG", "GTT",
+        "GAA", "GAC", "GAG", "GAT",
+        "GCA", "GCC", "GCG", "GCT",
+        "GGA", "GGC", "GGG", "GGT",
+        "GTA", "GTC", "GTG", "GTT",
 
-    "TAA", "TAC", "TAG", "TAT",
-    "TCA", "TCC", "TCG", "TCT",
-    "TGA", "TGC", "TGG", "TGT",
-    "TTA", "TTC", "TTG", "TTT",
+        "TAA", "TAC", "TAG", "TAT",
+        "TCA", "TCC", "TCG", "TCT",
+        "TGA", "TGC", "TGG", "TGT",
+        "TTA", "TTC", "TTG", "TTT",
 };
 __constant__ int  c_size ;
 char perms[64][4] = {
@@ -115,13 +117,18 @@ string join(const std::vector<std::string> &lst, const std::string &delim){
 __global__ void sumKmereCoincidences(char *data, int *indices, unsigned num_seqs, int *sum){
     // each block is comparing a sample with others
     //int idx = threadIdx.x+blockDim.x*blockIdx.x;
-    __shared__ int entry;
+    int entry = blockIdx.x;
     // Each thread count all coincidences of a k-mere combination.
     int k_mere = threadIdx.x;
-    int idx    = blockIdx.x * blockDim.x + threadIdx.x;
+    //int idx    = blockIdx.x * blockDim.x + threadIdx.x;
+    int idx    = blockIdx.x * PERMS_KMERES + threadIdx.x;
+    extern __shared__ int sDataSum[];
+    int maxIdxSM = (int) (49152 / sizeof(int));
     //printf("outside blockid: %d \n", blockIdx.x);
-    if (blockIdx.x < num_seqs && threadIdx.x <= 64){
-        entry = blockIdx.x;
+    // 12288
+    if ((blockIdx.x < num_seqs) && (threadIdx.x < PERMS_KMERES)){
+        if(idx < maxIdxSM )
+            sDataSum[idx] = 0;
         __syncthreads();
         // Fase uno: sumamos todos los valores de la suma de los k-meros de cada entrada.
         // Cada bloque se encarga de cada cadena de entrada
@@ -146,14 +153,60 @@ __global__ void sumKmereCoincidences(char *data, int *indices, unsigned num_seqs
                 break;
             }
             if(is_same_kmere){
-                //printf("Idx: %d: %d\n", idx, sum[idx]);
-                //printf("|");
-                // TODO: intentar usar otro tipo de memoria y pasar al final el resultado final a la matriz de resultados
+                if(idx < maxIdxSM)
+                    sDataSum[idx] += 1;
+                else
+                    sum[idx] += 1;
+            }
+        }
+        __syncthreads();
+        if (idx < maxIdxSM)
+            sum[idx] = sDataSum[idx];
+    }
+}
+// intento 1: .350 [s]
+__global__ void sumKmereCoincidencesGlobalMemory(char *data, int *indices, unsigned num_seqs, int *sum){
+    // each block is comparing a sample with others
+    //int idx = threadIdx.x+blockDim.x*blockIdx.x;
+    int entry = blockIdx.x;
+    // Each thread count all coincidences of a k-mere combination.
+    int k_mere = threadIdx.x;
+    //int idx    = blockIdx.x * blockDim.x + threadIdx.x;
+    int idx    = blockIdx.x * PERMS_KMERES + threadIdx.x;
+    //printf("outside blockid: %d \n", blockIdx.x);
+    if ((entry < num_seqs) && (threadIdx.x < PERMS_KMERES)){
+
+        // Fase uno: sumamos todos los valores de la suma de los k-meros de cada entrada.
+        // Cada bloque se encarga de cada cadena de entrada
+        // Cada hilo se encarga de sumar cada permutación.
+        const char *currentKmere = c_perms[k_mere];
+        // Entonces cada hilo tendría que iterar toda la muestra solo una vez para calcular la suma.
+        int entryLength = indices[entry + 1] -  indices[entry];
+        // entonces iteramos por cada letra de la entrada hasta la N-k (los índices).
+        // Podríamos guardar los índices en memoria constante para agilizar la lectura...
+        bool is_same_kmere = true;
+        char * sequence = data+indices[entry];
+        char currentSubstringFromSample[4];
+        for (int i = 0; i < entryLength-3; i++){
+            memcpy( currentSubstringFromSample, &sequence[i], 3 );
+            currentSubstringFromSample[3] = '\0';
+            is_same_kmere = true;
+            for(int j = 0; j < 3; j++){
+                if (currentSubstringFromSample[j] == currentKmere[j]){
+                    continue;
+                }
+                is_same_kmere = false;
+                break;
+            }
+            if(is_same_kmere){
                 sum[idx] += 1;
             }
         }
+        __syncthreads();
     }
 }
+
+
 /*
 __global__ void minKmerzeDist(int *sums, double *distances, int num_seqs, double *mins){
     // Cada bloque se encargará de calcular un k-mero
@@ -183,6 +236,11 @@ __global__ void minKmerzeDist(int *sums, double *distances, int num_seqs, double
     mins[idx] =
 
 }*/
+
+// https://www.geeksforgeeks.org/convert-given-upper-triangular-matrix-to-1d-array/
+__device__ __host__ int getIdxTriangularMatrixRowMajor(int i, int j, int n){
+    return (n * (i - 1) - (((i - 2) * (i - 1)) / 2)) + (j - i);
+}
 
 // extracted and modified from MK Programming Massively. 2nd Edition p.209
 __global__ void parallelSum(float *results, int idxResult, int InputSize) {
@@ -214,7 +272,7 @@ __global__ void parallelSum(float *results, int idxResult, int InputSize) {
 __global__ void minKmereDist(int *sums, float *distances, int num_seqs, int start){
     int current_seq   = blockIdx.x;
     int idx           = current_seq+blockDim.x*threadIdx.x;
-    int idxDist       = start*blockDim.x+current_seq;
+    //int idxDist       = start*blockDim.x+current_seq;
     int min_sums[PERMS_KMERES] = {0};
     // Se guarda en memoria compartida las repeticiones de los kmeros de las dos entradas a comparar.
     __shared__ int seqs_sums[PERMS_KMERES*2];
@@ -242,6 +300,47 @@ __global__ void minKmereDist(int *sums, float *distances, int num_seqs, int star
     }
 
 }
+/*
+ * @param sums:    matriz que contiene el número de coincidencias de cada k-mero en cada cadena.
+ * @param mins:    matriz de las sumas de los k-meros mínimos entre las cadenas i e i+1, respectivamente
+ *                  (tamaño num_seqsxnum_seqs).
+ *                  Por el momento se implementó un arreglo equivalente a una matriz triangular con el fin
+ *                   de reducir la memoria.
+ * @param num_seqs: secuencias totales a considerar.
+ * @param num_kmeres: combinaciones totales de k-meros.
+ *
+ */
+//  TODO: checar si num_kmeres se puede usar para inicializar un arreglo aquí.
+__global__ void minKmeres(int *sums, int *mins, int num_seqs, int num_kmeres){
+    int current_seq   = blockIdx.x;
+    int current_kmere  = threadIdx.x;
+    int current_comp;
+    int idxMin;
+    // es del tamaño de la ent
+    __shared__ int PIVOT[PERMS_KMERES];
+    int i;
+    //j;
+    int jump = 1;
+    int current_sum = 0;
+
+    // Guardamos en memoria compartida el pivote porque se accederá dos veces.
+    if(current_seq < num_seqs && current_kmere < num_kmeres) {// initialize PIVOT
+        PIVOT[current_kmere] = sums[current_seq+current_kmere*blockDim.x];
+        __syncthreads();
+        while(jump+current_seq < num_seqs){
+            for(i = current_seq; i < num_seqs; i+=jump){
+                current_comp = sums[current_seq+i+current_kmere*num_seqs];
+                current_sum  = current_comp < PIVOT[current_kmere] ?
+                               current_comp : PIVOT[current_kmere];
+            }
+            jump++;
+        }
+        __syncthreads(); // TODO: verificar que no afecta esto al resultado, pero reduce las colisiones.
+        idxMin = getIdxTriangularMatrixRowMajor(current_seq+1, current_comp+1, num_kmeres);
+        atomicAdd(&mins[idxMin], current_sum);
+    }
+}
+
 
 
 int main(int argc, char **argv) {
@@ -257,7 +356,6 @@ int main(int argc, char **argv) {
     //string file = "/home/acervantes/kmerDist/all_seqs.fasta";
     importSeqs(file);
     // Reserving memory for results
-    numberOfSequenses = seqs.size();
     //printf("%d sequences founded", numberOfSequenses);
     distancesSequential = (float**) malloc(sizeof(float*) * numberOfSequenses);
     //distancesParallel   = (float**) malloc(sizeof(float*) * numberOfSequenses);
@@ -273,7 +371,7 @@ int main(int argc, char **argv) {
     //doSequentialKmereDistance(); return 0;
 
     // Device allocation
-    int numSumResults = numberOfSequenses*64; // sequences x 4**3
+    int numSumResults = numberOfSequenses*PERMS_KMERES; // sequences x 4**3
     int sumsSize = sizeof(int)*numSumResults;
     h_sums = (int*) malloc(sumsSize);
     for (int i = 0; i < numSumResults; i++){
@@ -302,21 +400,32 @@ int main(int argc, char **argv) {
     int max_indexes = indexes_aux.size();
     //int last_data_idx = sizeof(all_seqs) - 1;
     //for (int i = 0; i < max_indexes - 1; i++){
-        //printf("idx %d: %d\n", i, indexes[i]);
-        //int entryLength = (i != max_indexes -1)  ? indexes[i + 1] -  indexes[i] - 1 : sizeof(all_seqs) - (indexes[i]);
-        //const char * sequence = all_seqs+indexes[i] ;
-        //printf("sequence size %d: %s\n", entryLength, sequence);
+    //printf("idx %d: %d\n", i, indexes[i]);
+    //int entryLength = (i != max_indexes -1)  ? indexes[i + 1] -  indexes[i] - 1 : sizeof(all_seqs) - (indexes[i]);
+    //const char * sequence = all_seqs+indexes[i] ;
+    //printf("sequence size %d: %s\n", entryLength, sequence);
     //}
 
     //std::copy(indexes_aux.begin(), indexes_aux.end(), indexes);
     //int size_seqs = sizeof(all_seqs) * sizeof(char);
+
+    /**
+     * Mins: será una estructura de datos para minimizar el uso de memoria.
+     * En total, sería de n (n+1) / 2 donde n es el número de muestras.
+     * */
+    minsSize = (int) (numberOfSequenses*(numberOfSequenses+1) / 2);
+    h_mins   = (int*) malloc(minsSize * sizeof(int));
+    for(int i = 0; i < minsSize; i++)
+        h_mins[i] = 0;
+
     cudaMalloc((void **)&d_data, size_all_seqs);
+    /*
     error = cudaMalloc((void **)&d_distances, sizeDistances);
     if (error){
         printf("Error al usar memoria con distancia %d ::", error);
         cout << sizeDistances << endl;
         return 0;
-    }
+    }*/
     int indexesBytesSize = indexes_aux.size()*sizeof(int);
     error = cudaMalloc((void **)&d_indices, indexesBytesSize);
     if (error){
@@ -328,6 +437,7 @@ int main(int argc, char **argv) {
     for(int i=0; i<dimsDistances; i++){
         h_distances[i] = 0;
     }
+    printf("sizeAllSeqs: %d\n", numberOfSequenses);
     error = cudaMemcpy(d_data, all_seqs, size_all_seqs, cudaMemcpyHostToDevice);
     if (error){
         printf("Error copying data from host %d", error);
@@ -336,30 +446,52 @@ int main(int argc, char **argv) {
     if (error){
         printf("Error copying data from host %d", error);
     }
+    /*
     error = cudaMemcpy(d_distances, h_distances, sizeDistances, cudaMemcpyHostToDevice);
     if (error){
         printf("Error copying distances matrix from host %d", error);
-    }
+    }*/
     error = cudaMemcpy(d_indices, indexes, indexesBytesSize, cudaMemcpyHostToDevice);
     if (error){
         printf("Error copying data from device %d\n", error);
     }
+    /*
+    error = cudaMalloc((void **)&d_mins, minsSize*sizeof(int));
+    if (error){
+        printf("Error #%d allocating memory to d_mins", error);
+        exit(1);
+    }
+    error = cudaMemcpy(d_mins, h_mins, minsSize*sizeof(int), cudaMemcpyHostToDevice);
+     if (error){
+        printf("Error copying data from host %d", error);
+        exit(1);
+    }
+     */
     int threads = 64;
     int blocks = numberOfSequenses;
     //int blocks = 10;
     //int threads = 64;
-    cudaEvent_t start, stop;
+    cudaEvent_t start;
+    cudaEvent_t stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
+    printf("Running %d blocks and %d threads, shared memory size: %d Kb\n", blocks, threads, (int)(sumsSize/1024));
     cudaEventRecord(start,0);
     // Launch kernel
-    printf("Running %d blocks and %d threads\n", blocks, threads);
-    sumKmereCoincidences<<<blocks, threads>>>(d_data, d_indices, numberOfSequenses, d_sums);
-    minKmereDist<<<10, 1024>>>(d_sums,d_distances, numberOfSequenses, 0);
+    //int smSize = 49152;
+    //sumKmereCoincidences<<<blocks, threads, smSize>>>(d_data, d_indices, numberOfSequenses, d_sums);
+    sumKmereCoincidencesGlobalMemory<<<blocks, threads>>>(d_data, d_indices, numberOfSequenses, d_sums);
+    //minKmereDist<<<10, 1024>>>(d_sums,d_distances, numberOfSequenses, 0);
     cudaError_t err_;
     cudaDeviceSynchronize();
     err_ = cudaGetLastError();
-    printf("LastError: %d\n", err_);
+    if (err_)
+        printf("LastError kmere dist: %d\n", err_);
+    //minKmeres<<<blocks, threads>>>(d_sums, d_mins, numberOfSequenses, PERMS_KMERES);
+    cudaDeviceSynchronize();
+    err_ = cudaGetLastError();
+    if (err_)
+        printf("LastError min kmeres: %d\n", err_);
     cudaEventRecord(stop,0);
     cudaEventSynchronize(stop);
     float parallelTimer = 0;
@@ -367,14 +499,17 @@ int main(int argc, char **argv) {
     cout<< "Elapsed parallel timer: " << parallelTimer << " ms, " << parallelTimer / 1000 << " secs" <<endl;
     //cudaMemcpy(h_distances, d_distances, sizeDistances, cudaMemcpyDeviceToHost);
     cudaMemcpy(h_sums, d_sums, sumsSize, cudaMemcpyDeviceToHost);
-    /*printf("Sums:\n");
+
+    printf("Sums:\n");
     for(int j = 0, idx = 0; j < 64; j++){
         printf("%d: ", j);
         for(int i = 0; i < numberOfSequenses; i++){
             printf("%d,\t", h_sums[idx++]);
         }
         printf("\n");
-    }*/
+    }
+
+
 
     free(distancesSequential);
     //free(distancesParallel);
@@ -394,6 +529,7 @@ void doSequentialKmereDistance(){
     double serialTimer = 0;
     serialTimer = double (end_ser-start_ser) / double(CLOCKS_PER_SEC);
     cout << "Elapsed time serial: " << serialTimer << "[s]" << endl;
+
     for (int i = 0; i < numberOfSequenses ; i++){
         for (int j = 0; j < numberOfSequenses ; j++) {
             fprintf(f_seq_res,"%f ",distancesSequential[i][j]);
@@ -437,7 +573,7 @@ void importSeqs(string inputFile){
             newSeq = false;
             acc = line;
             while (getline(input, line)) {
-                if(line.empty() ){
+                if(line.empty() || line[0] == 13){
                     acc += "|";
                     seqs.push_back(acc);
                     indexes_aux.push_back(indexCounter);
@@ -460,6 +596,7 @@ void importSeqs(string inputFile){
         }
     }
     int last_index = indexes_aux.size();
+    numberOfSequenses = seqs.size();
     size_all_seqs = globalAcc.size()*sizeof(char);
     all_seqs = (char *) malloc(size_all_seqs);
     for(int i = 0; i < globalAcc.size(); i++){
