@@ -65,7 +65,7 @@ __constant__ char c_perms[64][4] = {
         "TGA", "TGC", "TGG", "TGT",
         "TTA", "TTC", "TTG", "TTT",
 };
-__constant__ int  c_size ;
+
 char perms[64][4] = {
         "AAA", "AAC", "AAG","AAT",
         "ACA", "ACC", "ACG","ACT",
@@ -348,24 +348,11 @@ __global__ void minKmeres(int *sums, int *mins, int num_seqs, int num_kmeres){
 
 
 int main(int argc, char **argv) {
-
-    //    const char* prueba = "Esto\00Es\00Una\00Prueba";
-    //    std::cout << prueba;
-    //    return;
-
     //char permutations[len];
-
     // absolute path of the input data
     importSeqs(file);
+    std::cout << "Size all seqs:" << size_all_seqs << std::endl;
     // Device allocation
-
-
-
-
-
-
-
-
     doParallelKmereDistance();
     return 0;
 }
@@ -406,41 +393,55 @@ void doSequentialKmereDistance(){
 
 void doParallelKmereDistance(){
     cudaError_t error;
+    /**
+     * Inicialización
+     * */
+
+    // Buffer de cadenas
+    error = cudaMalloc((void **)&d_data, size_all_seqs);
+    if (error){
+        printf("Error #%d allocating device memory with data.", error);
+        exit(1);
+    }
+    error = cudaMemcpy(d_data, all_seqs, size_all_seqs, cudaMemcpyHostToDevice);
+    if (error){
+        printf("Error copying data from host %d\n", error);
+        exit(1);
+    }
+
+    // Los índices de las entradas de las cadenas.
+    int *indexes = (int *) malloc((int)indexes_aux.size() * sizeof(int));
+    for (int i = 0; i < indexes_aux.size(); i++){
+        indexes[i] = indexes_aux[i];
+    }
+    int indexesBytesSize = indexes_aux.size()*sizeof(int);
+    error = cudaMalloc((void **)&d_indices, indexesBytesSize);
+    if (error){
+        printf("Error malloc %d", error);
+    }
+    error = cudaMemcpy(d_indices, indexes, indexesBytesSize, cudaMemcpyHostToDevice);
+    if (error) printf("Error copying data from device %d\n", error);
+
+    // Suma de cada kmero de cada entrada.
     int numSumResults = numberOfSequenses*PERMS_KMERES; // sequences x 4**3
     int sumsSize = sizeof(int)*numSumResults;
     h_sums = (int*) malloc(sumsSize);
     for (int i = 0; i < numSumResults; i++){
         h_sums[i] = 0;
     }
-    cudaMalloc((void**)&d_sums, sumsSize);
+    cudaMalloc((void **)&d_sums, sumsSize);
+    error = cudaMemcpy(d_sums, h_sums, sumsSize, cudaMemcpyHostToDevice);
+    if (error){
+        printf("Error copying data from host %d", error);
+        exit(1);
+    }
     /* // defining a constant value is passed to the device directly.
     error = cudaMemcpyToSymbol(c_perms, &perms, 4*64 * sizeof(char) );
     if (error){
         printf("Errorsti : %d: %s\n", error, cudaGetErrorString(error));
     }
     */
-    error = cudaMemcpyToSymbol(c_size, &permsSize, sizeof(int) );
-    if (error){
-        printf("Error %d: %s", error, cudaGetErrorString(error));
-    }
-    unsigned long int sizeDistances = numberOfSequenses*numberOfSequenses * sizeof(float);
-    string data_aux = join(seqs, "\0");
     //int indexes[indexes_aux.size()];
-    int *indexes = (int *) malloc((int)indexes_aux.size() * sizeof(int));
-    for (int i = 0; i < indexes_aux.size(); i++){
-        indexes[i] = indexes_aux[i];
-    }
-    int max_indexes = indexes_aux.size();
-    //int last_data_idx = sizeof(all_seqs) - 1;
-    //for (int i = 0; i < max_indexes - 1; i++){
-    //printf("idx %d: %d\n", i, indexes[i]);
-    //int entryLength = (i != max_indexes -1)  ? indexes[i + 1] -  indexes[i] - 1 : sizeof(all_seqs) - (indexes[i]);
-    //const char * sequence = all_seqs+indexes[i] ;
-    //printf("sequence size %d: %s\n", entryLength, sequence);
-    //}
-
-    //std::copy(indexes_aux.begin(), indexes_aux.end(), indexes);
-    //int size_seqs = sizeof(all_seqs) * sizeof(char);
 
     /**
      * Mins: será una estructura de datos para minimizar el uso de memoria.
@@ -450,92 +451,40 @@ void doParallelKmereDistance(){
     h_mins   = (int*) malloc(minsSize * sizeof(int));
     for(int i = 0; i < minsSize; i++)
         h_mins[i] = 0;
-    error = cudaMalloc((void **)&d_data, size_all_seqs);
-    if (error){
-        printf("Error #%d allocating device memory with data.", error);
-        cout << sizeDistances << endl;
-        exit(1);
-    }
-
-    /*
-    error = cudaMalloc((void **)&d_distances, sizeDistances);
-    if (error){
-        printf("Error al usar memoria con distancia %d ::", error);
-        cout << sizeDistances << endl;
-        return 0;
-    }*/
-    int indexesBytesSize = indexes_aux.size()*sizeof(int);
-    error = cudaMalloc((void **)&d_indices, indexesBytesSize);
-    if (error){
-        printf("Error malloc %d", error);
-    }
-    float *h_distances;
-    h_distances =(float*) malloc(sizeDistances);
-    int dimsDistances = numberOfSequenses*numberOfSequenses;
-    for(int i=0; i<dimsDistances; i++){
-        h_distances[i] = 0;
-    }
-    printf("sizeAllSeqs: %d\n", numberOfSequenses);
-    error = cudaMemcpy(d_data, all_seqs, size_all_seqs, cudaMemcpyHostToDevice);
-    if (error){
-        printf("Error copying data from host %d", error);
-    }
-    error = cudaMemcpy(d_sums, h_sums, sumsSize, cudaMemcpyHostToDevice);
-    if (error){
-        printf("Error copying data from host %d", error);
-    }
-    /*
-    error = cudaMemcpy(d_distances, h_distances, sizeDistances, cudaMemcpyHostToDevice);
-    if (error){
-        printf("Error copying distances matrix from host %d", error);
-    }*/
-    error = cudaMemcpy(d_indices, indexes, indexesBytesSize, cudaMemcpyHostToDevice);
-    if (error){
-        printf("Error copying data from device %d\n", error);
-    }
-    /*
-    error = cudaMalloc((void **)&d_mins, minsSize*sizeof(int));
-    if (error){
-        printf("Error #%d allocating memory to d_mins", error);
-        exit(1);
-    }
-    error = cudaMemcpy(d_mins, h_mins, minsSize*sizeof(int), cudaMemcpyHostToDevice);
-     if (error){
-        printf("Error copying data from host %d", error);
-        exit(1);
-    }
-     */
     int threads = 64;
     int blocks = numberOfSequenses;
     //int blocks = 10;
     //int threads = 64;
     cudaEvent_t start;
     cudaEvent_t stop;
+    cudaError_t err_;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
-    printf("Running %d blocks and %d threads, shared memory size: %d Kb\n", blocks, threads, (int)(sumsSize/1024));
-    cudaEventRecord(start,0);
+    printf("Running %d blocks and %d threads\n", blocks, threads);
     // Launch kernel
     //int smSize = 49152;
     //sumKmereCoincidences<<<blocks, threads, smSize>>>(d_data, d_indices, numberOfSequenses, d_sums);
+    cudaEventRecord(start,0);
     sumKmereCoincidencesGlobalMemory<<<blocks, threads>>>(d_data, d_indices, numberOfSequenses, d_sums);
     //minKmereDist<<<10, 1024>>>(d_sums,d_distances, numberOfSequenses, 0);
-    cudaError_t err_;
     cudaDeviceSynchronize();
-    err_ = cudaGetLastError();
-    if (err_)
-        printf("LastError kmere dist: %d\n", err_);
-    //minKmeres<<<blocks, threads>>>(d_sums, d_mins, numberOfSequenses, PERMS_KMERES);
-    cudaDeviceSynchronize();
-    err_ = cudaGetLastError();
-    if (err_)
-        printf("LastError min kmeres: %d\n", err_);
     cudaEventRecord(stop,0);
     cudaEventSynchronize(stop);
     float parallelTimer = 0;
     cudaEventElapsedTime(&parallelTimer, start, stop);
     cout<< "Elapsed parallel timer: " << parallelTimer << " ms, " << parallelTimer / 1000 << " secs" <<endl;
+    err_ = cudaGetLastError();
+    if (err_)
+        printf("LastError kmere dist: %d\n", err_);
+    //minKmeres<<<blocks, threads>>>(d_sums, d_mins, numberOfSequenses, PERMS_KMERES);
+    //cudaDeviceSynchronize();
+    err_ = cudaGetLastError();
+    if (err_)
+        printf("LastError min kmeres: %d\n", err_);
+
+    //unsigned long int sizeDistances = numberOfSequenses*numberOfSequenses * sizeof(float);
     //cudaMemcpy(h_distances, d_distances, sizeDistances, cudaMemcpyDeviceToHost);
+
     cudaMemcpy(h_sums, d_sums, sumsSize, cudaMemcpyDeviceToHost);
     /*
     printf("Sums:\n");
@@ -553,7 +502,45 @@ void doParallelKmereDistance(){
     cudaFree(d_indices);
     cudaFree(d_data);
     cudaFree(d_sums);
+    cudaFree(d_mins);
+
     return;
+    /*
+    error = cudaMalloc((void **)&d_distances, sizeDistances);
+    if (error){
+        printf("Error al usar memoria con distancia %d ::", error);
+        cout << sizeDistances << endl;
+        return 0;
+    }*/
+
+
+    //    float *h_distances;
+    //    h_distances =(float*) malloc(sizeDistances);
+    //    int dimsDistances = numberOfSequenses*numberOfSequenses;
+    //    for(int i=0; i<dimsDistances; i++){
+    //        h_distances[i] = 0;
+    //    }
+
+
+    /*
+    error = cudaMemcpy(d_distances, h_distances, sizeDistances, cudaMemcpyHostToDevice);
+    if (error){
+        printf("Error copying distances matrix from host %d", error);
+    }*/
+
+    /*
+    error = cudaMalloc((void **)&d_mins, minsSize*sizeof(int));
+    if (error){
+        printf("Error #%d allocating memory to d_mins", error);
+        exit(1);
+    }
+    error = cudaMemcpy(d_mins, h_mins, minsSize*sizeof(int), cudaMemcpyHostToDevice);
+     if (error){
+        printf("Error copying data from host %d", error);
+        exit(1);
+    }
+     */
+
 }
 void importSeqs(string inputFile){
     int indexCounter = 0;
