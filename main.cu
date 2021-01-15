@@ -24,6 +24,7 @@ void printSeqs();
 void getPermutations(char *str, char* permutations, int last, int index);
 int permutationsCount(string permutation, string sequence, int k);
 void sequentialKmerCount(vector<string> &seqs, vector<string> &permutations , int k);
+void doParallelKmereDistance();
 void doSequentialKmereDistance();
 // Vectors to store ids and seqs
 vector<string> ids;
@@ -38,6 +39,9 @@ int * d_sums; // coincidences of k-mer on each input
 int * d_mins, *h_mins;
 int * h_sums;
 int minsSize;
+
+string file = "/home/acervantes/kmerDist/plants.fasta";
+//string file = "/home/acervantes/kmerDist/all_seqs.fasta";
 
 // number of permutations of RNA K_meres and k-value
 __constant__ char c_perms[64][4] = {
@@ -350,13 +354,26 @@ int main(int argc, char **argv) {
     //    return;
 
     //char permutations[len];
-    cudaError_t error;
+
     // absolute path of the input data
-    string file = "/home/acervantes/kmerDist/plants.fasta";
-    //string file = "/home/acervantes/kmerDist/all_seqs.fasta";
     importSeqs(file);
-    // Reserving memory for results
-    //printf("%d sequences founded", numberOfSequenses);
+    // Device allocation
+
+
+
+
+
+
+
+
+    doParallelKmereDistance();
+    return 0;
+}
+
+void doSequentialKmereDistance(){
+    // results files
+    FILE *f_seq_res = fopen("/home/acervantes/kmerDist/sequential_results.csv", "w");
+
     distancesSequential = (float**) malloc(sizeof(float*) * numberOfSequenses);
     //distancesParallel   = (float**) malloc(sizeof(float*) * numberOfSequenses);
     for(int i = 0; i < numberOfSequenses; i++){
@@ -368,9 +385,27 @@ int main(int argc, char **argv) {
             distancesSequential[i][j] = -1;
         }
     }
-    //doSequentialKmereDistance(); return 0;
+    clock_t start_ser = clock();
+    sequentialKmerCount(seqs, permutationsList, 3);
+    clock_t end_ser = clock();
+    double serialTimer = 0;
+    serialTimer = double (end_ser-start_ser) / double(CLOCKS_PER_SEC);
+    cout << "Elapsed time serial: " << serialTimer << "[s]" << endl;
 
-    // Device allocation
+    for (int i = 0; i < numberOfSequenses ; i++){
+        for (int j = 0; j < numberOfSequenses ; j++) {
+            fprintf(f_seq_res,"%f ",distancesSequential[i][j]);
+            //printf("%f ",distancesSequential[i][j]);
+            //distancesParallel[i][j] = 0;
+        }
+        fprintf(f_seq_res,"\n");
+        //printf("\n");
+    }
+    fclose(f_seq_res);
+}
+
+void doParallelKmereDistance(){
+    cudaError_t error;
     int numSumResults = numberOfSequenses*PERMS_KMERES; // sequences x 4**3
     int sumsSize = sizeof(int)*numSumResults;
     h_sums = (int*) malloc(sumsSize);
@@ -378,8 +413,6 @@ int main(int argc, char **argv) {
         h_sums[i] = 0;
     }
     cudaMalloc((void**)&d_sums, sumsSize);
-
-
     /* // defining a constant value is passed to the device directly.
     error = cudaMemcpyToSymbol(c_perms, &perms, 4*64 * sizeof(char) );
     if (error){
@@ -417,8 +450,13 @@ int main(int argc, char **argv) {
     h_mins   = (int*) malloc(minsSize * sizeof(int));
     for(int i = 0; i < minsSize; i++)
         h_mins[i] = 0;
+    error = cudaMalloc((void **)&d_data, size_all_seqs);
+    if (error){
+        printf("Error #%d allocating device memory with data.", error);
+        cout << sizeDistances << endl;
+        exit(1);
+    }
 
-    cudaMalloc((void **)&d_data, size_all_seqs);
     /*
     error = cudaMalloc((void **)&d_distances, sizeDistances);
     if (error){
@@ -499,7 +537,7 @@ int main(int argc, char **argv) {
     cout<< "Elapsed parallel timer: " << parallelTimer << " ms, " << parallelTimer / 1000 << " secs" <<endl;
     //cudaMemcpy(h_distances, d_distances, sizeDistances, cudaMemcpyDeviceToHost);
     cudaMemcpy(h_sums, d_sums, sumsSize, cudaMemcpyDeviceToHost);
-
+    /*
     printf("Sums:\n");
     for(int j = 0, idx = 0; j < 64; j++){
         printf("%d: ", j);
@@ -507,9 +545,7 @@ int main(int argc, char **argv) {
             printf("%d,\t", h_sums[idx++]);
         }
         printf("\n");
-    }
-
-
+    }*/
 
     free(distancesSequential);
     //free(distancesParallel);
@@ -517,31 +553,8 @@ int main(int argc, char **argv) {
     cudaFree(d_indices);
     cudaFree(d_data);
     cudaFree(d_sums);
-    return 0;
+    return;
 }
-
-void doSequentialKmereDistance(){
-    // results files
-    FILE *f_seq_res = fopen("/home/acervantes/kmerDist/sequential_results.csv", "w");
-    clock_t start_ser = clock();
-    sequentialKmerCount(seqs, permutationsList, 3);
-    clock_t end_ser = clock();
-    double serialTimer = 0;
-    serialTimer = double (end_ser-start_ser) / double(CLOCKS_PER_SEC);
-    cout << "Elapsed time serial: " << serialTimer << "[s]" << endl;
-
-    for (int i = 0; i < numberOfSequenses ; i++){
-        for (int j = 0; j < numberOfSequenses ; j++) {
-            fprintf(f_seq_res,"%f ",distancesSequential[i][j]);
-            //printf("%f ",distancesSequential[i][j]);
-            //distancesParallel[i][j] = 0;
-        }
-        fprintf(f_seq_res,"\n");
-        //printf("\n");
-    }
-    fclose(f_seq_res);
-}
-
 void importSeqs(string inputFile){
     int indexCounter = 0;
     ifstream input(inputFile);
@@ -673,9 +686,3 @@ void printSeqs(){
         cout << ">" <<  seqs[i] << endl;
     }
 }
-
-/*
-void kmerDistance(int k){
-
-}
- */
