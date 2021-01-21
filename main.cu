@@ -395,9 +395,10 @@ int main(int argc, char **argv) {
     //char permutations[len];
     // absolute path of the input data
     importSeqs(file);
+    doSequentialKmereDistance();
     std::cout << "Size all seqs:" << size_all_seqs << std::endl;
     // Device allocation
-    doParallelKmereDistance();
+    //doParallelKmereDistance();
     return 0;
 }
 
@@ -725,15 +726,18 @@ void sequentialKmerCount(vector<string> &seqs, vector<string> &permutations , in
             if(i >= j)
                 continue;
             // iterating over permutations (distance of Ri an Rj).
-            int minLength = min(seqs[i].size(), seqs[j].size());
+            //restamos uno por el | auxiliar que agregamos en todo al final
+            int minLength = min(seqs[i].size() - 1, seqs[j].size() - 1);
             int sum = 0;
             float distance = -1.0f;
+            int minimum = -1;
             for(int p = 0; p < max_combinations; p++){
-                int minimum = min(
+                minimum = min(
                         permutationsCount(permutations[p], seqs[i],k),
                         permutationsCount(permutations[p], seqs[j],k)
                 );
                 sum += minimum;
+
             }
 
             distance = 1 - (float) sum / (minLength - k + 1);
@@ -749,7 +753,7 @@ int permutationsCount(string permutation, string sequence, int k){
     int counter = 0;
     string current_kmere;
     for(int i = 0; i < sequence_len - k; i++){
-        current_kmere = sequence.substr(i,i+k);
+        current_kmere = sequence.substr(i,k);
         if (permutation.compare(current_kmere) == 0){
             counter++;
         }
