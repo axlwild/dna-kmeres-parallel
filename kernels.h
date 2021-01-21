@@ -37,7 +37,7 @@ __constant__ char c_perms[64][4] = {
 };
 
 // https://www.geeksforgeeks.org/convert-given-upper-triangular-matrix-to-1d-array/
-__device__ __host__ int getIdxTriangularMatrixRowMajor(int i, int j, int n){
+__device__ __host__ long getIdxTriangularMatrixRowMajor(long i, long j, int n){
     return (n * (i - 1) - (((i - 2) * (i - 1)) / 2)) + (j - i);
 }
 
@@ -47,20 +47,21 @@ __global__ void minKmeres1(int *sums, float *mins, int num_seqs, int current_seq
     // guardamos en memoria compartida
     // los kmeros de la entrada actual
     __shared__ int current_seq_kmeres[PERMS_KMERES];
-    // puedo soltar los 54k bloques, entonces cada bloque puede tener índice
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if(idx < PERMS_KMERES ){
-        current_seq_kmeres[idx] = sums[idx*num_seqs];
+        current_seq_kmeres[idx] = sums[idx*num_seqs+current_seq];
         //printf("%d\n", current_seq_kmeres[idx]);
     }
     __syncthreads();
     int entryLength;
     int compLength;
-    if(idx > current_seq && idx < num_seqs){
+    //if(idx > current_seq && idx < num_seqs){
+    if(idx == 46343){
         float min = 0;
         float sumMins = 0;
         entryLength = indexes[current_seq + 1] -  indexes[current_seq] - 1;
         compLength = indexes[idx + 1] -  indexes[idx] -1;
+
         if (entryLength < compLength)
             compLength = entryLength;
         for(int i = 0; i < PERMS_KMERES; i++){

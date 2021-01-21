@@ -33,8 +33,8 @@ int blocks = ceil(float(n)/float(threads));
 int threadsStep1 = PERMS_KMERES;
 int blockThread1 = BLOCKS_STEP_1;
 
-string file = "/home/acervantes/kmerDist/plants.fasta";
-//string file = "/home/acervantes/kmerDist/all_seqs.fasta";
+//string file = "/home/acervantes/kmerDist/plants.fasta";
+string file = "/home/acervantes/kmerDist/all_seqs.fasta";
 // Method definition
 void importSeqs(string inputFile);
 void printSeqs();
@@ -385,7 +385,9 @@ void doParallelKmereDistance(){
     //minKmeres<<<blocks, 64>>>(d_sums, d_mins, numberOfSequenses);
     // sin ejecutar kernel tarda aprox 344 ms
     // ejecutando kernel 374 ms
+
     for(int i = 0; i < numberOfSequenses; i++){
+        break;
         minKmeres1<<<blocks, threads>>>(sums, mins, numberOfSequenses, i, indexes);
         cudaDeviceSynchronize();
         err_ = cudaGetLastError();
@@ -404,8 +406,8 @@ void doParallelKmereDistance(){
     float parallelTimer = 0;
     cudaEventElapsedTime(&parallelTimer, start, stop);
     cout<< "Elapsed parallel timer: " << parallelTimer << " ms, " << parallelTimer / 1000 << " secs" <<endl;
-    /*
-    printf("SumaMins:\n");
+
+    /*printf("SumaMins:\n");
     for(int i = 0; i < minsSize; i++){
         printf("%f\t", mins[i]);
     }
