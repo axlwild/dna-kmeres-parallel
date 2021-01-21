@@ -17,7 +17,6 @@
 #define K 3
 using namespace std;
 int          numberOfSequenses = 0;
-char *       all_seqs;
 unsigned int size_all_seqs = 0;
 
 int n = N;
@@ -26,8 +25,8 @@ int blocks = ceil(float(n)/float(threads));
 int threadsStep1 = PERMS_KMERES;
 int blockThread1 = BLOCKS_STEP_1;
 
-string file = "/home/acervantes/kmerDist/plants.fasta";
-//string file = "/home/acervantes/kmerDist/all_seqs.fasta";
+//string file = "/home/acervantes/kmerDist/plants.fasta";
+string file = "/home/acervantes/kmerDist/all_seqs.fasta";
 // Method definition
 void importSeqs(string inputFile);
 void printSeqs();
@@ -42,12 +41,11 @@ vector<string> seqs;
 vector<int> indexes_aux;
 
 // Device variables.
-char    * d_data; // all the strings.
-int     * d_indices;
-float   * d_distances;
-int * d_sums; // coincidences of k-mer on each input
-float * d_mins, *h_mins;
-int * h_sums;
+char    *data; // all the strings.
+int     *indexes;
+float   *distances;
+int     *sums; // coincidences of k-mer on each input
+float   *mins;
 long minsSize;
 
 
@@ -405,7 +403,6 @@ int main(int argc, char **argv) {
 void doSequentialKmereDistance(){
     // results files
     FILE *f_seq_res = fopen("/home/acervantes/kmerDist/sequential_results.csv", "w");
-
     distancesSequential = (float**) malloc(sizeof(float*) * numberOfSequenses);
     //distancesParallel   = (float**) malloc(sizeof(float*) * numberOfSequenses);
     for(int i = 0; i < numberOfSequenses; i++){
@@ -441,53 +438,30 @@ void doParallelKmereDistance(){
     /**
      * Inicialización
      * */
-
-    // Buffer de cadenas
-    error = cudaMalloc((void **)&d_data, size_all_seqs);
-    if (error){
-        printf("Error #%d allocating device memory with data.", error);
-        exit(1);
-    }
-    error = cudaMemcpy(d_data, all_seqs, size_all_seqs, cudaMemcpyHostToDevice);
-    if (error){
-        printf("Error copying data (d_data) from host %d\n", error);
-        exit(1);
-    }
-
     // Los índices de las entradas de las cadenas.
-    int *indexes = (int *) malloc((int)indexes_aux.size() * sizeof(int));
+    int *indexes;
     int numIndexes = indexes_aux.size();
+    error = cudaMallocManaged(&indexes, numIndexes * sizeof(int));
+    if (error){
+        printf("Error malloc indexes: error #%d\n", error);
+        exit(1);
+    }
     for (int i = 0; i < indexes_aux.size(); i++){
         indexes[i] = indexes_aux[i];
     }
-    int indexesBytesSize = indexes_aux.size()*sizeof(int);
-    error = cudaMalloc((void **)&d_indices, indexesBytesSize);
-    if (error){
-        printf("Error malloc %d", error);
-    }
-    error = cudaMemcpy(d_indices, indexes, indexesBytesSize, cudaMemcpyHostToDevice);
-    if (error) printf("Error copying data from device %d\n", error);
 
     // Suma de cada kmero de cada entrada.
     int numSumResults = numberOfSequenses*PERMS_KMERES; // sequences x 4**3
     int sumsSize = sizeof(int)*numSumResults;
-    h_sums = (int*) malloc(sumsSize);
-    for (int i = 0; i < numSumResults; i++){
-        h_sums[i] = 0;
-    }
-    cudaMalloc((void **)&d_sums, sumsSize);
-    error = cudaMemcpy(d_sums, h_sums, sumsSize, cudaMemcpyHostToDevice);
+    error = cudaMallocManaged(&sums, sumsSize);
     if (error){
-        printf("Error copying data (h_sums) from host %d", error);
+        printf("Error malloc indexes: error #%d\n", error);
         exit(1);
     }
-    /* // defining a constant value is passed to the device directly.
-    error = cudaMemcpyToSymbol(c_perms, &perms, 4*64 * sizeof(char) );
-    if (error){
-        printf("Errorsti : %d: %s\n", error, cudaGetErrorString(error));
+    for (int i = 0; i < numSumResults; i++){
+        sums[i] = 0;
     }
-    */
-    //int indexes[indexes_aux.size()];
+
 
     /**
      * Mins: será una estructura de datos para minimizar el uso de memoria.
@@ -495,15 +469,13 @@ void doParallelKmereDistance(){
      * Pero como tampoco es necesaria la matriz principal, se resta N elementos
      */
     minsSize = (long) ((long)numberOfSequenses*((long)numberOfSequenses+1) / 2) - numberOfSequenses;
-    h_mins   = (float*) malloc(minsSize * sizeof(float));
-    for(int i = 0; i < minsSize; i++)
-        h_mins[i] = 0;
-    cudaMalloc((void **)&d_mins, minsSize*sizeof(float));
-    error = cudaMemcpy(d_mins, h_mins, minsSize*sizeof(float), cudaMemcpyHostToDevice);
+    error = cudaMallocManaged(&mins, minsSize*sizeof(float));
     if (error){
-        printf("Error copying data (h_mins) from host %d", error);
+        printf("Error malloc mins: error #%d\n", error);
         exit(1);
     }
+    for(int i = 0; i < minsSize; i++)
+        mins[i] = 0;
     //int blocks = 10;
     //int threads = 64;
     cudaEvent_t start;
@@ -527,23 +499,18 @@ void doParallelKmereDistance(){
      * .
      * Km64S, Km64S2, Km64S3, ... , Km64Sn
      * */
-    sumKmereCoincidencesGlobalMemory<<<blockThread1, threadsStep1>>>(d_data, d_indices, numberOfSequenses, d_sums);
+    sumKmereCoincidencesGlobalMemory<<<blockThread1, threadsStep1>>>(data, indexes, numberOfSequenses, sums);
     cudaDeviceSynchronize();
     err_ = cudaGetLastError();
     if (err_)
         printf("LastError sumCoincidences #%d\n", err_);
-    cudaMemcpy(h_sums, d_sums, sumsSize, cudaMemcpyDeviceToHost);
-    err_ = cudaGetLastError();
+    cudaFree(data);
 
-    if (err_)
-        printf("LastError sumCoincidences #%d\n", err_);
-    cudaFree(d_data);
-    /*
-    printf("Sums:\n");
+    /*printf("Sums:\n");
     for(int j = 0, idx = 0; j < PERMS_KMERES; j++){
         printf("%d: ", j);
         for(int i = 0; i < numberOfSequenses; i++){
-            printf("%d,\t", h_sums[idx++]);
+            printf("%d,\t", sums[idx++]);
         }
         printf("\n");
     }
@@ -565,14 +532,13 @@ void doParallelKmereDistance(){
     // sin ejecutar kernel tarda aprox 344 ms
     // ejecutando kernel 374 ms
     for(int i = 0; i < numberOfSequenses; i++){
-        minKmeres1<<<blocks, threads>>>(d_sums, d_mins, numberOfSequenses, i, d_indices);
+        minKmeres1<<<blocks, threads>>>(sums, mins, numberOfSequenses, i, indexes);
         cudaDeviceSynchronize();
         err_ = cudaGetLastError();
         if (err_){
             printf("LastError kmere dist: %d iteration %d\n", err_, i);
             exit(1);
         }
-
     }
     cudaDeviceSynchronize();
     err_ = cudaGetLastError();
@@ -584,11 +550,10 @@ void doParallelKmereDistance(){
     float parallelTimer = 0;
     cudaEventElapsedTime(&parallelTimer, start, stop);
     cout<< "Elapsed parallel timer: " << parallelTimer << " ms, " << parallelTimer / 1000 << " secs" <<endl;
-    cudaMemcpy(h_mins, d_mins, minsSize*sizeof(float), cudaMemcpyDeviceToHost);
     /*
     printf("SumaMins:\n");
     for(int i = 0; i < minsSize; i++){
-        printf("%f\t", h_mins[i]);
+        printf("%f\t", mins[i]);
     }
     printf("\n");*/
     //printMinDistances(h_mins, minsSize, numberOfSequenses);
@@ -599,8 +564,6 @@ void doParallelKmereDistance(){
 
     //unsigned long int sizeDistances = numberOfSequenses*numberOfSequenses * sizeof(float);
     //cudaMemcpy(h_distances, d_distances, sizeDistances, cudaMemcpyDeviceToHost);
-
-    cudaMemcpy(h_sums, d_sums, sumsSize, cudaMemcpyDeviceToHost);
     /*
     printf("Sums:\n");
     for(int j = 0, idx = 0; j < 64; j++){
@@ -614,10 +577,10 @@ void doParallelKmereDistance(){
 
     free(distancesSequential);
     //free(distancesParallel);
-    cudaFree(d_distances);
-    cudaFree(d_indices);
-    cudaFree(d_sums);
-    cudaFree(d_mins);
+    cudaFree(distances);
+    cudaFree(indexes);
+    cudaFree(sums);
+    cudaFree(mins);
 
     return;
     /*
@@ -710,13 +673,18 @@ void importSeqs(string inputFile){
     int last_index = indexes_aux.size();
     numberOfSequenses = seqs.size();
     size_all_seqs = globalAcc.size()*sizeof(char);
-    all_seqs = (char *) malloc(size_all_seqs);
+    cudaError_t error;
+    error = cudaMallocManaged(&data, size_all_seqs);
+    if (error){
+        printf("Error #%d allocating device memory with data.", error);
+        exit(1);
+    }
     for(int i = 0; i < globalAcc.size(); i++){
         if (globalAcc[i] == '|'){
-            all_seqs[i] = '\0';
+            data[i] = '\0';
             continue;
         }
-        all_seqs[i] = globalAcc[i];
+        data[i] = globalAcc[i];
     }
     return;
 }
