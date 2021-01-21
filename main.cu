@@ -537,6 +537,7 @@ void doParallelKmereDistance(){
 
     if (err_)
         printf("LastError sumCoincidences #%d\n", err_);
+    cudaFree(d_data);
     /*
     printf("Sums:\n");
     for(int j = 0, idx = 0; j < PERMS_KMERES; j++){
@@ -547,9 +548,6 @@ void doParallelKmereDistance(){
         printf("\n");
     }
     printf("\n");*/
-
-    // en este punto d_sums tiene la suma de las coincidencias de cada entrada.
-    // Obtenemos las distancias de todas las cadenas vs todas las cadenas de los mínimos.
     /**
      * Paso 2: calcular las distancias de todo vs todo.
      *      Para toda cadena i:
@@ -568,6 +566,13 @@ void doParallelKmereDistance(){
     // ejecutando kernel 374 ms
     for(int i = 0; i < numberOfSequenses; i++){
         minKmeres1<<<blocks, threads>>>(d_sums, d_mins, numberOfSequenses, i, d_indices);
+        cudaDeviceSynchronize();
+        err_ = cudaGetLastError();
+        if (err_){
+            printf("LastError kmere dist: %d iteration %d\n", err_, i);
+            exit(1);
+        }
+
     }
     cudaDeviceSynchronize();
     err_ = cudaGetLastError();
@@ -611,7 +616,6 @@ void doParallelKmereDistance(){
     //free(distancesParallel);
     cudaFree(d_distances);
     cudaFree(d_indices);
-    cudaFree(d_data);
     cudaFree(d_sums);
     cudaFree(d_mins);
 
