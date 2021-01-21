@@ -37,7 +37,7 @@ __constant__ char c_perms[64][4] = {
 };
 
 // https://www.geeksforgeeks.org/convert-given-upper-triangular-matrix-to-1d-array/
-__device__ __host__ long getIdxTriangularMatrixRowMajor(long i, long j, int n){
+__device__ __host__ long getIdxTriangularMatrixRowMajor(long i, long j, long n){
     return (n * (i - 1) - (((i - 2) * (i - 1)) / 2)) + (j - i);
 }
 
@@ -55,9 +55,9 @@ __global__ void minKmeres1(int *sums, float *mins, int num_seqs, int current_seq
     __syncthreads();
     int entryLength;
     int compLength;
-    //if(idx > current_seq && idx < num_seqs){
-    if(idx == 46343){
-        float min = 0;
+    if(idx > current_seq && idx < num_seqs){
+    //if(idx == 46343){
+        float min;
         float sumMins = 0;
         entryLength = indexes[current_seq + 1] -  indexes[current_seq] - 1;
         compLength = indexes[idx + 1] -  indexes[idx] -1;
@@ -81,7 +81,10 @@ __global__ void minKmeres1(int *sums, float *mins, int num_seqs, int current_seq
         //float sumbefore = sumMins;
         sumMins = 1 - sumMins/((compLength) - K + 1);
         //printf("Input #%d min_size %d, sum_mins=%f, before: %f\n", idx, compLength, sumMins, sumbefore);
-        mins[getIdxTriangularMatrixRowMajor(current_seq+1, idx - current_seq , num_seqs)] = sumMins;
+        long aux = getIdxTriangularMatrixRowMajor(current_seq+1, idx - current_seq , (long)num_seqs);
+        //  aux = getIdxTriangularMatrixRowMajor(1, 10001 , (long)num_seqs);
+
+        mins[aux] = sumMins;
     }
 }
 

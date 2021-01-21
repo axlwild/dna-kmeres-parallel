@@ -3,14 +3,16 @@
 #include <string>
 #include <vector>
 #include <set>
-#include <math.h>
 #include <algorithm>
 #include <sstream>
 #include <typeinfo>
+#include <cuda_runtime.h>
+#include <cuda_runtime_api.h>
 #include "cuda.h"
 #include <cooperative_groups.h>
-#include <limits.h>
+#include <climits>
 #include "utils.h"
+
 #include "kernels.h"
 
 #ifndef PERMS_KMERES
@@ -20,7 +22,7 @@
 #define K 3
 #endif
 
-#define N 54018*1024
+#define N (54018*1024)
 #define BLOCKS_STEP_1 54018
 
 using namespace std;
@@ -37,6 +39,7 @@ int blockThread1 = BLOCKS_STEP_1;
 string file = "/home/acervantes/kmerDist/all_seqs.fasta";
 // Method definition
 void importSeqs(string inputFile);
+
 void printSeqs();
 void getPermutations(char *str, char* permutations, int last, int index);
 int permutationsCount(string permutation, string sequence, int k);
@@ -80,7 +83,6 @@ char perms[64][4] = {
         "TGA", "TGC", "TGG", "TGT",
         "TTA", "TTC", "TTG", "TTT",
 };
-int permsSize = sizeof(perms) ;
 
 vector<string> permutationsList (perms, end(perms));
 
@@ -243,7 +245,7 @@ __global__ void minKmeres(int *sums, int *mins, int num_seqs){
     }
 }
 
-int main(int argc, char **argv) {
+int main() {
     //char permutations[len];
     // absolute path of the input data
     importSeqs(file);
@@ -293,7 +295,6 @@ void doParallelKmereDistance(){
      * Inicialización
      * */
     // Los índices de las entradas de las cadenas.
-    int *indexes;
     int numIndexes = indexes_aux.size();
     error = cudaMallocManaged(&indexes, numIndexes * sizeof(int));
     if (error){
@@ -360,14 +361,14 @@ void doParallelKmereDistance(){
      * .
      * Km64S, Km64S2, Km64S3, ... , Km64Sn
      * */
-    cudaEventRecord(start,0);
+    cudaEventRecord(start, nullptr);
     sumKmereCoincidencesGlobalMemory<<<blockThread1, threadsStep1>>>(data, indexes, numberOfSequenses, sums);
     cudaDeviceSynchronize();
     err_ = cudaGetLastError();
     if (err_)
         printf("LastError sumCoincidences #%d\n", err_);
     cudaFree(data);
-    cudaEventRecord(stop,0);
+    cudaEventRecord(stop, nullptr);
     cudaEventSynchronize(stop);
     float parallelTimer = 0;
     cudaEventElapsedTime(&parallelTimer, start, stop);
@@ -397,7 +398,7 @@ void doParallelKmereDistance(){
     //minKmeres<<<blocks, 64>>>(d_sums, d_mins, numberOfSequenses);
     // sin ejecutar kernel tarda aprox 344 ms
     // ejecutando kernel 374 ms
-    cudaEventRecord(start,0);
+    cudaEventRecord(start, nullptr);
     for(int i = 0; i < numberOfSequenses; i++){
         minKmeres1<<<blocks, threads>>>(sums, mins, numberOfSequenses, i, indexes);
         cudaDeviceSynchronize();
@@ -411,7 +412,7 @@ void doParallelKmereDistance(){
     err_ = cudaGetLastError();
     if (err_)
         printf("LastError kmere dist: %d\n", err_);
-    cudaEventRecord(stop,0);
+    cudaEventRecord(stop, nullptr);
     cudaEventSynchronize(stop);
     parallelTimer = 0;
     cudaEventElapsedTime(&parallelTimer, start, stop);
@@ -575,7 +576,7 @@ void sequentialKmerCount(vector<string> &seqs, vector<string> &permutations , in
             //restamos uno por el | auxiliar que agregamos en todo al final
             int minLength = min(seqs[i].size() - 1, seqs[j].size() - 1);
             int sum = 0;
-            float distance = -1.0f;
+            float distance;
             int minimum = -1;
             for(int p = 0; p < max_combinations; p++){
                 minimum = min(
