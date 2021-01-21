@@ -328,20 +328,27 @@ void doParallelKmereDistance(){
         printf("Error malloc mins: error #%d\n", error);
         exit(1);
     }
+    printf("%d sequences founded.\n", numberOfSequenses);
+    printf("Allocating %ld elements of distance results.\n", minsSize);
+    printf("Sample before: %d\n", mins[10000]);
     for(int i = 0; i < minsSize; i++)
         mins[i] = 0;
     //int blocks = 10;
     //int threads = 64;
     cudaEvent_t start;
+    cudaEvent_t globalStart;
     cudaEvent_t stop;
+    cudaEvent_t globalStop;
     cudaError_t err_;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
+    cudaEventCreate(&globalStart);
+    cudaEventCreate(&globalStop);
+
     printf("Running %d blocks and %d threads\n", blocks, threads);
     // Launch kernel
     //int smSize = 49152;
     //sumKmereCoincidences<<<blocks, threads, smSize>>>(d_data, d_indices, numberOfSequenses, d_sums);
-    cudaEventRecord(start,0);
     /**
      * Primera parte: se obtiene la matriz d_mins que contiene las distancias mínimas
      * de todos los kmeros de cada entrada.
@@ -353,13 +360,18 @@ void doParallelKmereDistance(){
      * .
      * Km64S, Km64S2, Km64S3, ... , Km64Sn
      * */
+    cudaEventRecord(start,0);
     sumKmereCoincidencesGlobalMemory<<<blockThread1, threadsStep1>>>(data, indexes, numberOfSequenses, sums);
     cudaDeviceSynchronize();
     err_ = cudaGetLastError();
     if (err_)
         printf("LastError sumCoincidences #%d\n", err_);
     cudaFree(data);
-
+    cudaEventRecord(stop,0);
+    cudaEventSynchronize(stop);
+    float parallelTimer = 0;
+    cudaEventElapsedTime(&parallelTimer, start, stop);
+    cout<< "Elapsed parallel timer step 1: " << parallelTimer << " ms, " << parallelTimer / 1000 << " secs" <<endl;
     /*printf("Sums:\n");
     for(int j = 0, idx = 0; j < PERMS_KMERES; j++){
         printf("%d: ", j);
@@ -385,9 +397,8 @@ void doParallelKmereDistance(){
     //minKmeres<<<blocks, 64>>>(d_sums, d_mins, numberOfSequenses);
     // sin ejecutar kernel tarda aprox 344 ms
     // ejecutando kernel 374 ms
-
+    cudaEventRecord(start,0);
     for(int i = 0; i < numberOfSequenses; i++){
-        break;
         minKmeres1<<<blocks, threads>>>(sums, mins, numberOfSequenses, i, indexes);
         cudaDeviceSynchronize();
         err_ = cudaGetLastError();
@@ -400,13 +411,18 @@ void doParallelKmereDistance(){
     err_ = cudaGetLastError();
     if (err_)
         printf("LastError kmere dist: %d\n", err_);
-
     cudaEventRecord(stop,0);
     cudaEventSynchronize(stop);
-    float parallelTimer = 0;
+    parallelTimer = 0;
     cudaEventElapsedTime(&parallelTimer, start, stop);
-    cout<< "Elapsed parallel timer: " << parallelTimer << " ms, " << parallelTimer / 1000 << " secs" <<endl;
+    cout<< "Elapsed parallel step 2 timer: " << parallelTimer << " ms, " << parallelTimer / 1000 << " secs" <<endl;
 
+    cudaEventRecord(globalStop,0);
+    cudaEventSynchronize(globalStop);
+    parallelTimer = 0;
+    cudaEventElapsedTime(&parallelTimer, globalStart, globalStop);
+    cout<< "Total time elapsed parallel: " << parallelTimer << " ms, " << parallelTimer / 1000 << " secs" <<endl;
+    printf("Sample: %d", mins[10000]);
     /*printf("SumaMins:\n");
     for(int i = 0; i < minsSize; i++){
         printf("%f\t", mins[i]);
