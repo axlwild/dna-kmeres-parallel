@@ -10,9 +10,9 @@
 #include "cuda.h"
 #include <cooperative_groups.h>
 #include <limits.h>
-
+#include "utils.h"
 #define PERMS_KMERES 64
-#define N 54018*64
+#define N 54018*1024
 #define BLOCKS_STEP_1 54018
 
 using namespace std;
@@ -26,6 +26,8 @@ int blocks = ceil(float(n)/float(threads));
 int threadsStep1 = PERMS_KMERES;
 int blockThread1 = BLOCKS_STEP_1;
 
+string file = "/home/acervantes/kmerDist/plants.fasta";
+//string file = "/home/acervantes/kmerDist/all_seqs.fasta";
 // Method definition
 void importSeqs(string inputFile);
 void printSeqs();
@@ -48,8 +50,6 @@ int * d_mins, *h_mins;
 int * h_sums;
 long minsSize;
 
-string file = "/home/acervantes/kmerDist/plants.fasta";
-//string file = "/home/acervantes/kmerDist/all_seqs.fasta";
 
 // number of permutations of RNA K_meres and k-value
 __constant__ char c_perms[64][4] = {
@@ -364,10 +364,6 @@ __global__ void minKmeres1(int *sums, int *mins, int num_seqs, int current_seq){
     if(idx > current_seq && idx < num_seqs){
         int min = 0;
         int sumMins = 0;
-        if (current_seq <= 1)
-        {
-            printf("current index in sums: %d\n", idx);
-        }
         for(int i = 0; i < PERMS_KMERES; i++){
             int cur_kmere = sums[idx+num_seqs*i];
             /*if (idx == num_seqs - 1 && current_seq == 0)
@@ -530,7 +526,7 @@ void doParallelKmereDistance(){
 
     if (err_)
         printf("LastError sumCoincidences #%d\n", err_);
-
+    /*
     printf("Sums:\n");
     for(int j = 0, idx = 0; j < PERMS_KMERES; j++){
         printf("%d: ", j);
@@ -539,7 +535,7 @@ void doParallelKmereDistance(){
         }
         printf("\n");
     }
-    printf("\n");
+    printf("\n");*/
 
     // en este punto d_sums tiene la suma de las coincidencias de cada entrada.
     // Obtenemos las distancias de todas las cadenas vs todas las cadenas de los mínimos.
@@ -570,11 +566,11 @@ void doParallelKmereDistance(){
     float parallelTimer = 0;
     cudaEventElapsedTime(&parallelTimer, start, stop);
     cout<< "Elapsed parallel timer: " << parallelTimer << " ms, " << parallelTimer / 1000 << " secs" <<endl;
-    cout<< "Elapsed parallel timer: " << parallelTimer << " ms, " << parallelTimer / 1000 << " secs" <<endl;
     cudaMemcpy(h_mins, d_mins, minsSize*sizeof(int), cudaMemcpyDeviceToHost);
-    for(int i = 0; i < minsSize; i++){
+    /*for(int i = 0; i < minsSize; i++){
         printf("%d\t", h_mins[i]);
-    }
+    }*/
+    printMinDistances(h_mins, minsSize, numberOfSequenses);
     /* // Para comprobar que los índices están bien.
     for(int i = 0; i < numIndexes - 1; i++){
         std::cout << "idx: " << indexes[i] << "\tCadena " << i << " :" << all_seqs+indexes[i]+1 << std::endl;
