@@ -366,8 +366,8 @@ __global__ void minKmeres1(int *sums, float *mins, int num_seqs, int current_seq
     if(idx > current_seq && idx < num_seqs){
         float min = 0;
         float sumMins = 0;
-        entryLength = indexes[current_seq + 1] -  indexes[current_seq];
-        compLength = indexes[idx + 1] -  indexes[idx];
+        entryLength = indexes[current_seq + 1] -  indexes[current_seq] - 1;
+        compLength = indexes[idx + 1] -  indexes[idx] -1;
         if (entryLength < compLength)
             compLength = entryLength;
         for(int i = 0; i < PERMS_KMERES; i++){
@@ -385,8 +385,8 @@ __global__ void minKmeres1(int *sums, float *mins, int num_seqs, int current_seq
             // hacemos la correción de la resta porque no necesitamos la diagonal principal.
         }
         //float sumbefore = sumMins;
-        sumMins = 1 - sumMins/((float)compLength - (float)(K + 1));
-        //printf("Input #%d min_size %d, sum_mins=%f, before: %f\n", idx, entryLength, sumMins, sumbefore);
+        sumMins = 1 - sumMins/((compLength) - K + 1);
+        //printf("Input #%d min_size %d, sum_mins=%f, before: %f\n", idx, compLength, sumMins, sumbefore);
         mins[getIdxTriangularMatrixRowMajor(current_seq+1, idx - current_seq , num_seqs)] = sumMins;
     }
 }
@@ -395,10 +395,10 @@ int main(int argc, char **argv) {
     //char permutations[len];
     // absolute path of the input data
     importSeqs(file);
-    doSequentialKmereDistance();
+    //doSequentialKmereDistance();
     std::cout << "Size all seqs:" << size_all_seqs << std::endl;
     // Device allocation
-    //doParallelKmereDistance();
+    doParallelKmereDistance();
     return 0;
 }
 
@@ -554,10 +554,11 @@ void doParallelKmereDistance(){
      * Paso 2: calcular las distancias de todo vs todo.
      *      Para toda cadena i:
      *        - Obtener distancia desde i+1 hasta n.
-     *
+     * Paso 3: Al calcular las distancias, aplicar la fórmula.
      * Versión 1: Reducción de operaciones por llamada al kernel.
      * Versión 2: utilizar una localización de hilos tal que se ejecute siempre lo mismo y
      *            no se desperdicie memoria
+     *
      * */
     //minKmereDist<<<10, 1024>>>(d_sums,d_distances, numberOfSequenses, 0);
 
@@ -579,12 +580,13 @@ void doParallelKmereDistance(){
     cudaEventElapsedTime(&parallelTimer, start, stop);
     cout<< "Elapsed parallel timer: " << parallelTimer << " ms, " << parallelTimer / 1000 << " secs" <<endl;
     cudaMemcpy(h_mins, d_mins, minsSize*sizeof(float), cudaMemcpyDeviceToHost);
+    /*
     printf("SumaMins:\n");
     for(int i = 0; i < minsSize; i++){
         printf("%f\t", h_mins[i]);
     }
-    printf("\n");
-    printMinDistances(h_mins, minsSize, numberOfSequenses);
+    printf("\n");*/
+    //printMinDistances(h_mins, minsSize, numberOfSequenses);
     /* // Para comprobar que los índices están bien.
     for(int i = 0; i < numIndexes - 1; i++){
         std::cout << "idx: " << indexes[i] << "\tCadena " << i << " :" << all_seqs+indexes[i]+1 << std::endl;
