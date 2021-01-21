@@ -14,7 +14,7 @@
 #define PERMS_KMERES 64
 #define N 54018*1024
 #define BLOCKS_STEP_1 54018
-
+#define K 3
 using namespace std;
 int          numberOfSequenses = 0;
 char *       all_seqs;
@@ -46,7 +46,7 @@ char    * d_data; // all the strings.
 int     * d_indices;
 float   * d_distances;
 int * d_sums; // coincidences of k-mer on each input
-int * d_mins, *h_mins;
+float * d_mins, *h_mins;
 int * h_sums;
 long minsSize;
 
@@ -350,7 +350,7 @@ __global__ void minKmeres(int *sums, int *mins, int num_seqs){
     }
 }
 /*Versión 1: sumar en cada llamada los mínimos entre current_seq y los consecuentes*/
-__global__ void minKmeres1(int *sums, int *mins, int num_seqs, int current_seq){
+__global__ void minKmeres1(int *sums, float *mins, int num_seqs, int current_seq, int* indexes){
     // guardamos en memoria compartida
     // los kmeros de la entrada actual
     __shared__ int current_seq_kmeres[PERMS_KMERES];
@@ -361,9 +361,15 @@ __global__ void minKmeres1(int *sums, int *mins, int num_seqs, int current_seq){
         //printf("%d\n", current_seq_kmeres[idx]);
     }
     __syncthreads();
+    int entryLength;
+    int compLength;
     if(idx > current_seq && idx < num_seqs){
-        int min = 0;
-        int sumMins = 0;
+        float min = 0;
+        float sumMins = 0;
+        entryLength = indexes[current_seq + 1] -  indexes[current_seq];
+        compLength = indexes[idx + 1] -  indexes[idx];
+        if (entryLength < compLength)
+            compLength = entryLength;
         for(int i = 0; i < PERMS_KMERES; i++){
             int cur_kmere = sums[idx+num_seqs*i];
             /*if (idx == num_seqs - 1 && current_seq == 0)
@@ -375,9 +381,13 @@ __global__ void minKmeres1(int *sums, int *mins, int num_seqs, int current_seq){
             else
                 min = cur_kmere;
             sumMins += min;
+
             // hacemos la correción de la resta porque no necesitamos la diagonal principal.
-            mins[getIdxTriangularMatrixRowMajor(current_seq+1, idx - current_seq , num_seqs)] = sumMins;
         }
+        //float sumbefore = sumMins;
+        sumMins = 1 - sumMins/((float)compLength - (float)(K + 1));
+        //printf("Input #%d min_size %d, sum_mins=%f, before: %f\n", idx, entryLength, sumMins, sumbefore);
+        mins[getIdxTriangularMatrixRowMajor(current_seq+1, idx - current_seq , num_seqs)] = sumMins;
     }
 }
 
@@ -484,11 +494,11 @@ void doParallelKmereDistance(){
      * Pero como tampoco es necesaria la matriz principal, se resta N elementos
      */
     minsSize = (long) ((long)numberOfSequenses*((long)numberOfSequenses+1) / 2) - numberOfSequenses;
-    h_mins   = (int*) malloc(minsSize * sizeof(int));
+    h_mins   = (float*) malloc(minsSize * sizeof(float));
     for(int i = 0; i < minsSize; i++)
         h_mins[i] = 0;
-    cudaMalloc((void **)&d_mins, minsSize*sizeof(int));
-    error = cudaMemcpy(d_mins, h_mins, minsSize*sizeof(int), cudaMemcpyHostToDevice);
+    cudaMalloc((void **)&d_mins, minsSize*sizeof(float));
+    error = cudaMemcpy(d_mins, h_mins, minsSize*sizeof(float), cudaMemcpyHostToDevice);
     if (error){
         printf("Error copying data (h_mins) from host %d", error);
         exit(1);
@@ -552,30 +562,32 @@ void doParallelKmereDistance(){
 
 
     //minKmeres<<<blocks, 64>>>(d_sums, d_mins, numberOfSequenses);
+    // sin ejecutar kernel tarda aprox 344 ms
+    // ejecutando kernel 374 ms
     for(int i = 0; i < numberOfSequenses; i++){
-        minKmeres1<<<blocks, threads>>>(d_sums, d_mins, numberOfSequenses, i);
+        minKmeres1<<<blocks, threads>>>(d_sums, d_mins, numberOfSequenses, i, d_indices);
     }
-
-
     cudaDeviceSynchronize();
     err_ = cudaGetLastError();
     if (err_)
         printf("LastError kmere dist: %d\n", err_);
+
     cudaEventRecord(stop,0);
     cudaEventSynchronize(stop);
     float parallelTimer = 0;
     cudaEventElapsedTime(&parallelTimer, start, stop);
     cout<< "Elapsed parallel timer: " << parallelTimer << " ms, " << parallelTimer / 1000 << " secs" <<endl;
-    cudaMemcpy(h_mins, d_mins, minsSize*sizeof(int), cudaMemcpyDeviceToHost);
-    /*for(int i = 0; i < minsSize; i++){
-        printf("%d\t", h_mins[i]);
-    }*/
+    cudaMemcpy(h_mins, d_mins, minsSize*sizeof(float), cudaMemcpyDeviceToHost);
+    printf("SumaMins:\n");
+    for(int i = 0; i < minsSize; i++){
+        printf("%f\t", h_mins[i]);
+    }
+    printf("\n");
     printMinDistances(h_mins, minsSize, numberOfSequenses);
     /* // Para comprobar que los índices están bien.
     for(int i = 0; i < numIndexes - 1; i++){
         std::cout << "idx: " << indexes[i] << "\tCadena " << i << " :" << all_seqs+indexes[i]+1 << std::endl;
     }*/
-
 
     //unsigned long int sizeDistances = numberOfSequenses*numberOfSequenses * sizeof(float);
     //cudaMemcpy(h_distances, d_distances, sizeDistances, cudaMemcpyDeviceToHost);
@@ -589,7 +601,8 @@ void doParallelKmereDistance(){
             printf("%d,\t", h_sums[idx++]);
         }
         printf("\n");
-    }*/
+    }
+    */
 
     free(distancesSequential);
     //free(distancesParallel);
