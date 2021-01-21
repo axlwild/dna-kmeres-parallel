@@ -7,7 +7,7 @@ project(Examen CUDA)
 
 set(CMAKE_CUDA_STANDARD 14)
 
-add_executable(Examen main.cu)
+add_executable(Examen main.cu utils.h kernels.h)
 
 set_target_properties(
         Examen
