@@ -23,6 +23,7 @@
 #endif
 
 #define N (54018*1024)
+#define PRINT_ANSWERS true
 #define BLOCKS_STEP_1 54018
 
 using namespace std;
@@ -35,8 +36,8 @@ int blocks = ceil(float(n)/float(threads));
 int threadsStep1 = PERMS_KMERES;
 int blockThread1 = BLOCKS_STEP_1;
 
-//string file = "/home/acervantes/kmerDist/plants.fasta";
-string file = "/home/acervantes/kmerDist/all_seqs.fasta";
+string file = "/home/acervantes/kmerDist/plants.fasta";
+//string file = "/home/acervantes/kmerDist/all_seqs.fasta";
 // Method definition
 void importSeqs(string inputFile);
 
@@ -46,6 +47,7 @@ int permutationsCount(string permutation, string sequence, int k);
 void sequentialKmerCount(vector<string> &seqs, vector<string> &permutations , int k);
 void doParallelKmereDistance();
 void doSequentialKmereDistance();
+long getIdxTriangularMatrixRowMajorSeq(long i, long j, long n);
 // Vectors to store ids and seqs
 vector<string> ids;
 vector<string> seqs;
@@ -58,7 +60,7 @@ float   *distances;
 int     *sums; // coincidences of k-mer on each input
 float   *mins;
 long minsSize;
-
+long resultsArraySize;
 
 
 
@@ -86,7 +88,7 @@ char perms[64][4] = {
 
 vector<string> permutationsList (perms, end(perms));
 
-float ** distancesSequential;
+float * distancesSequential;
 /**
  *
  * @param data:    buffer con todas las cadenas
@@ -249,42 +251,43 @@ int main() {
     //char permutations[len];
     // absolute path of the input data
     importSeqs(file);
-    //doSequentialKmereDistance();
+    resultsArraySize = numberOfSequenses*(numberOfSequenses-1) / 2 - numberOfSequenses;
     std::cout << "Size all seqs:" << size_all_seqs << std::endl;
+    //doSequentialKmereDistance();
+
     // Device allocation
-    doParallelKmereDistance();
+     doParallelKmereDistance();
     return 0;
 }
 
 void doSequentialKmereDistance(){
     // results files
     FILE *f_seq_res = fopen("/home/acervantes/kmerDist/sequential_results.csv", "w");
-    distancesSequential = (float**) malloc(sizeof(float*) * numberOfSequenses);
+    //distancesSequential = (float**) malloc(sizeof(float*) * numberOfSequenses);
     //distancesParallel   = (float**) malloc(sizeof(float*) * numberOfSequenses);
-    for(int i = 0; i < numberOfSequenses; i++){
-        distancesSequential[i] = (float*) malloc(numberOfSequenses*sizeof(float));
-        //distancesParallel[i]   = (float*) malloc(numberOfSequenses*sizeof(float));
-    }
-    for (int i = 0; i < numberOfSequenses ; i++){
-        for (int j = 0; j < numberOfSequenses ; j++) {
-            distancesSequential[i][j] = -1;
-        }
-    }
+    distancesSequential = (float*) calloc(numberOfSequenses, sizeof(float));
+
+    //    for (int i = 0; i < numberOfSequenses ; i++){
+    //        for (int j = 0; j < numberOfSequenses ; j++) {
+    //            distancesSequential[i][j] = -1;
+    //        }
+    //    }
     clock_t start_ser = clock();
     sequentialKmerCount(seqs, permutationsList, 3);
     clock_t end_ser = clock();
     double serialTimer = 0;
     serialTimer = double (end_ser-start_ser) / double(CLOCKS_PER_SEC);
     cout << "Elapsed time serial: " << serialTimer << "[s]" << endl;
-
-    for (int i = 0; i < numberOfSequenses ; i++){
-        for (int j = 0; j < numberOfSequenses ; j++) {
-            fprintf(f_seq_res,"%f ",distancesSequential[i][j]);
-            //printf("%f ",distancesSequential[i][j]);
+    //Algoritmo para imprimir:
+    if (PRINT_ANSWERS)
+    for (long i = numberOfSequenses - 1, idx = 0; i > 0 ; i--, idx++){
+        for (long j = 0; j < i ; j++) {
+            fprintf(f_seq_res,"%f\t",distancesSequential[idx]);
+            printf("%f ",distancesSequential[idx]);
             //distancesParallel[i][j] = 0;
         }
         fprintf(f_seq_res,"\n");
-        //printf("\n");
+        printf("\n");
     }
     fclose(f_seq_res);
 }
@@ -331,7 +334,6 @@ void doParallelKmereDistance(){
     }
     printf("%d sequences founded.\n", numberOfSequenses);
     printf("Allocating %ld elements of distance results.\n", minsSize);
-    printf("Sample before: %d\n", mins[10000]);
     for(int i = 0; i < minsSize; i++)
         mins[i] = 0;
     //int blocks = 10;
@@ -423,7 +425,14 @@ void doParallelKmereDistance(){
     parallelTimer = 0;
     cudaEventElapsedTime(&parallelTimer, globalStart, globalStop);
     cout<< "Total time elapsed parallel: " << parallelTimer << " ms, " << parallelTimer / 1000 << " secs" <<endl;
-    printf("Sample: %d", mins[10000]);
+    if(PRINT_ANSWERS)
+    for (long i = numberOfSequenses - 1, idx = 0; i > 0 ; i--, idx++){
+        for (long j = 0; j < i ; j++) {
+            printf("%f\t",mins[idx]);
+        }
+        printf("\n");
+    }
+
     /*printf("SumaMins:\n");
     for(int i = 0; i < minsSize; i++){
         printf("%f\t", mins[i]);
@@ -456,37 +465,6 @@ void doParallelKmereDistance(){
     cudaFree(mins);
 
     return;
-    /*
-    error = cudaMalloc((void **)&d_distances, sizeDistances);
-    if (error){
-        printf("Error al usar memoria con distancia %d ::", error);
-        cout << sizeDistances << endl;
-        return 0;
-    }*/
-
-
-    //    float *h_distances;
-    //    h_distances =(float*) malloc(sizeDistances);
-    //    int dimsDistances = numberOfSequenses*numberOfSequenses;
-    //    for(int i=0; i<dimsDistances; i++){
-    //        h_distances[i] = 0;
-    //    }
-
-
-    /*
-    error = cudaMemcpy(d_distances, h_distances, sizeDistances, cudaMemcpyHostToDevice);
-    if (error){
-        printf("Error copying distances matrix from host %d", error);
-    }*/
-
-    /*
-    error = cudaMalloc((void **)&d_mins, minsSize*sizeof(int));
-    if (error){
-        printf("Error #%d allocating memory to d_mins", error);
-        exit(1);
-    }
-
-     */
 
 }
 
@@ -564,7 +542,7 @@ void importSeqs(string inputFile){
 
 void sequentialKmerCount(vector<string> &seqs, vector<string> &permutations , int k){
     string mers[4] = {"A","C","G","T"};
-    int numberOfSequences = seqs.size();
+    long numberOfSequences = seqs.size();
     // |kmers| is at most 4**k = 4**3 = 64
     int max_combinations = pow(4,k);
     // Comparing example Ri with R(i+1) until Rn
@@ -584,19 +562,17 @@ void sequentialKmerCount(vector<string> &seqs, vector<string> &permutations , in
                         permutationsCount(permutations[p], seqs[j],k)
                 );
                 sum += minimum;
-
             }
-
             distance = 1 - (float) sum / (minLength - k + 1);
-            distancesSequential[i][j] = distance;
-            distancesSequential[j][i] = distance;
+            distancesSequential[getIdxTriangularMatrixRowMajorSeq((long) i +1 , (long) j, numberOfSequences)] = distance;
+            // distancesSequential[j][i] = distance;
         }
     }
     return;
 }
 
 int permutationsCount(string permutation, string sequence, int k){
-    int sequence_len = sequence.size();
+    int sequence_len = sequence.size() - 1;
     int counter = 0;
     string current_kmere;
     for(int i = 0; i < sequence_len - k; i++){
@@ -628,4 +604,8 @@ void printSeqs(){
     for (int i = 0; i<seqs.size(); i++){
         cout << ">" <<  seqs[i] << endl;
     }
+}
+
+long getIdxTriangularMatrixRowMajorSeq(long i, long j, long n){
+    return (n * (i - 1) - (((i - 2) * (i - 1)) / 2)) + (j - i);
 }
