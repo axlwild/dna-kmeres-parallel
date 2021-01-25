@@ -22,18 +22,20 @@
 #define K 3
 #endif
 
-#define N (54018*1024)
+#define THREADS 128
+#define N (54018*1024*128)
 #define PRINT_ANSWERS false
+#define PRINT_ANSWERS_FILE true
+
 #define BLOCKS_STEP_1 54018
-#define MAX_SEQS 50000
+#define MAX_SEQS 40000
 
 using namespace std;
 int          numberOfSequenses = 0;
 unsigned int size_all_seqs = 0;
 
-int n = N;
-int threads = 1024;
-int blocks = ceil(float(n)/float(threads));
+long threads = THREADS;
+long blocks = 65534;
 int threadsStep1 = PERMS_KMERES;
 int blockThread1 = BLOCKS_STEP_1;
 bool bug_log = false;
@@ -105,7 +107,7 @@ int main() {
     doSequentialKmereDistance();
     printf("\n\aParallel:\n");
     // Device allocation
-    //doParallelKmereDistance();
+    doParallelKmereDistance();
     return 0;
 }
 
@@ -131,6 +133,11 @@ void doSequentialKmereDistance(){
     for (long i = 0; i < resultsArraySize; i++){
         printf("%f\n", distancesSequential[i]);
     }
+
+    if(PRINT_ANSWERS_FILE)
+    for (long i = 0; i < resultsArraySize; i++){
+        fprintf(f_seq_res,"%f\n", distancesSequential[i]);
+    }
     /*for (long i = numberOfSequenses - 1, idx = 0; i > 0 ; i--){
         for (long j = 0; j < i ; j++, idx++) {
             fprintf(f_seq_res,"%f\t",distancesSequential[idx]);
@@ -144,6 +151,7 @@ void doSequentialKmereDistance(){
 }
 
 void doParallelKmereDistance(){
+    FILE *f_res = fopen("/home/acervantes/kmerDist/parallel_results.csv", "w");
     cudaError_t error;
     /**
      * Inicialización
@@ -199,7 +207,7 @@ void doParallelKmereDistance(){
     cudaEventCreate(&globalStart);
     cudaEventCreate(&globalStop);
 
-    printf("Running %d blocks and %d threads\n", blocks, threads);
+    printf("Running %ld blocks and %ld threads\n", blocks, threads);
     // Launch kernel
     //int smSize = 49152;
     //sumKmereCoincidences<<<blocks, threads, smSize>>>(d_data, d_indices, numberOfSequenses, d_sums);
@@ -255,7 +263,10 @@ void doParallelKmereDistance(){
     // ejecutando kernel 374 ms
     cudaEventRecord(start, nullptr);
     for(int i = 0; i < numberOfSequenses; i++){
-        minKmeres1<<<blocks, threads>>>(sums, mins, numberOfSequenses, i, indexes);
+        if (i == 60)
+            minKmeres2<<<blocks, 64>>>(sums, mins, numberOfSequenses, i, indexes);
+        else
+            minKmeres2<<<blocks, threads>>>(sums, mins, numberOfSequenses, i, indexes);
         cudaDeviceSynchronize();
         err_ = cudaGetLastError();
         if (err_){
@@ -281,6 +292,10 @@ void doParallelKmereDistance(){
     if(PRINT_ANSWERS)
     for (long i = 0; i < minsSize; i++){
         printf("%f\n", mins[i]);
+    }
+    if(PRINT_ANSWERS_FILE)
+    for (long i = 0; i < resultsArraySize; i++){
+        fprintf(f_res,"%f\n", mins[i]);
     }
     /*for (long i = numberOfSequenses - 1, idx = 0; i > 0 ; i--, idx++){
         for (long j = 0; j < i ; j++) {
@@ -338,7 +353,6 @@ void importSeqs(string inputFile){
 
     // Iterate over all secuences
     while (getline(input, line)) {
-        if(seqs.size() >= MAX_SEQS) break;
         // line may be empty so you *must* ignore blank lines
         // or you have a crash waiting to happen with line[0]
         if(line.empty()){
@@ -355,7 +369,6 @@ void importSeqs(string inputFile){
             newSeq = false;
             acc = line;
             while (getline(input, line)) {
-                if(seqs.size() >= MAX_SEQS) break;
                 if(line.empty() || line[0] == 13){
                     acc += "|";
                     seqs.push_back(acc);
@@ -366,9 +379,9 @@ void importSeqs(string inputFile){
                     break;
                 }
                 acc += line;
+                if(seqs.size() >= MAX_SEQS) break;
             }
             if (acc != ""){
-                if(seqs.size() >= MAX_SEQS) break;
                 acc += "|";
                 seqs.push_back(acc);
                 indexes_aux.push_back(indexCounter);
@@ -376,6 +389,7 @@ void importSeqs(string inputFile){
                 globalAcc += acc;
                 acc = "";
                 indexes_aux.push_back(indexCounter);
+                if(seqs.size() >= MAX_SEQS) break;
             }
         }
     }

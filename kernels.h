@@ -50,14 +50,12 @@ __global__ void minKmeres1(int *sums, float *mins, int num_seqs, int current_seq
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if(idx < PERMS_KMERES ){
         current_seq_kmeres[idx] = sums[idx*num_seqs+current_seq];
-        //printf("%d\n", current_seq_kmeres[idx]);
     }
     __syncthreads();
     int entryLength;
     int compLength;
     if(idx > current_seq && idx < num_seqs){
-    //if(idx == 46343){
-        float min;
+        //if(idx == 46343){
         float sumMins = 0;
         entryLength = indexes[current_seq + 1] -  indexes[current_seq] - 1;
         compLength = indexes[idx + 1] -  indexes[idx] -1;
@@ -65,23 +63,48 @@ __global__ void minKmeres1(int *sums, float *mins, int num_seqs, int current_seq
         if (entryLength < compLength)
             compLength = entryLength;
         for(int i = 0; i < PERMS_KMERES; i++){
-            int cur_kmere = sums[idx+num_seqs*i];
-            /*if (idx == num_seqs - 1 && current_seq == 0)
-            {
-                printf("i = %d, Comparing: %d vs %d\n", i, cur_kmere, current_seq_kmeres[i]);
-            }*/
-            if(cur_kmere > current_seq_kmeres[i])
-                min = current_seq_kmeres[i];
-            else
-                min = cur_kmere;
-            sumMins += min;
-
-            // hacemos la correción de la resta porque no necesitamos la diagonal principal.
+            sumMins += min(current_seq_kmeres[i], sums[idx+num_seqs*i]);
         }
         //float sumbefore = sumMins;
         sumMins = 1 - sumMins/((compLength) - K + 1);
         //printf("Input #%d min_size %d, sum_mins=%f, before: %f\n", idx, compLength, sumMins, sumbefore);
         long aux = getIdxTriangularMatrixRowMajor(current_seq+1, idx - current_seq , (long)num_seqs);
+        //  aux = getIdxTriangularMatrixRowMajor(1, 10001 , (long)num_seqs);
+
+        mins[aux] = sumMins;
+    }
+}
+
+
+__global__ void minKmeres2(int *sums, float *mins, int num_seqs, int current_seq, int* indexes){
+    // guardamos en memoria compartida
+    // los kmeros de la entrada actual
+    __shared__ int current_seq_kmeres[PERMS_KMERES];
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int idxGap = idx + current_seq ;
+    int tid = threadIdx.x;
+    if(tid < PERMS_KMERES){
+        current_seq_kmeres[tid] = sums[tid*num_seqs+current_seq];
+    }
+    __syncthreads();
+    int entryLength;
+    int compLength;
+    if(idxGap > current_seq && idxGap < num_seqs){
+        //printf("idx %d. Current seq: %d, num_seqs: %d\n", idxGap, current_seq, num_seqs);
+        //if(idx == 46343){
+        float sumMins = 0;
+        entryLength = indexes[current_seq + 1] -  indexes[current_seq] - 1;
+        compLength = indexes[idxGap + 1] -  indexes[idxGap] -1;
+
+        if (entryLength < compLength)
+            compLength = entryLength;
+        for(int i = 0; i < PERMS_KMERES; i++){
+            sumMins += min(current_seq_kmeres[i], sums[idxGap+num_seqs*i]);
+        }
+        //float sumbefore = sumMins;
+        sumMins = 1 - sumMins/((compLength) - K + 1);
+        //printf("Input #%d min_size %d, sum_mins=%f, before: %f\n", idx, compLength, sumMins, sumbefore);
+        long aux = getIdxTriangularMatrixRowMajor(current_seq+1, idxGap - current_seq , (long)num_seqs);
         //  aux = getIdxTriangularMatrixRowMajor(1, 10001 , (long)num_seqs);
 
         mins[aux] = sumMins;
