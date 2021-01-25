@@ -25,7 +25,7 @@
 #define N (54018*1024)
 #define PRINT_ANSWERS false
 #define BLOCKS_STEP_1 54018
-#define MAX_SEQS 10
+#define MAX_SEQS 50000
 
 using namespace std;
 int          numberOfSequenses = 0;
@@ -36,9 +36,9 @@ int threads = 1024;
 int blocks = ceil(float(n)/float(threads));
 int threadsStep1 = PERMS_KMERES;
 int blockThread1 = BLOCKS_STEP_1;
-
-string file = "/home/acervantes/kmerDist/plants.fasta";
-//string file = "/home/acervantes/kmerDist/all_seqs.fasta";
+bool bug_log = false;
+//string file = "/home/acervantes/kmerDist/plants.fasta";
+string file = "/home/acervantes/kmerDist/all_seqs.fasta";
 // Method definition
 void importSeqs(string inputFile);
 
@@ -46,6 +46,7 @@ void printSeqs();
 void getPermutations(char *str, char* permutations, int last, int index);
 int permutationsCount(string permutation, string sequence, int k);
 void sequentialKmerCount(vector<string> &seqs, vector<string> &permutations , int k);
+void sequentialKmerCount2(vector<string> &seqs, vector<string> &permutations , int k);
 void doParallelKmereDistance();
 void doSequentialKmereDistance();
 void permutationsCountAll(string sequence, int * countResults, int max_combinations, int k);
@@ -102,9 +103,9 @@ int main() {
     resultsArraySize = numberOfSequenses*(numberOfSequenses+1) / 2 - numberOfSequenses;
     std::cout << "Size all seqs:" << size_all_seqs << std::endl;
     doSequentialKmereDistance();
-    printf("\nParallel:\n");
+    printf("\n\aParallel:\n");
     // Device allocation
-    doParallelKmereDistance();
+    //doParallelKmereDistance();
     return 0;
 }
 
@@ -121,7 +122,7 @@ void doSequentialKmereDistance(){
     //        }
     //    }
     clock_t start_ser = clock();
-    sequentialKmerCount(seqs, permutationsList, 3);
+    sequentialKmerCount2(seqs, permutationsList, 3);
     clock_t end_ser = clock();
     double serialTimer = 0;
     serialTimer = double (end_ser-start_ser) / double(CLOCKS_PER_SEC);
@@ -396,7 +397,7 @@ void importSeqs(string inputFile){
     }
     return;
 }
-
+/*Versión secuencial 1: tarda más pero utiliza menos memoria*/
 void sequentialKmerCount(vector<string> &seqs, vector<string> &permutations , int k){
     string mers[4] = {"A","C","G","T"};
     long numberOfSequences = seqs.size();
@@ -412,6 +413,7 @@ void sequentialKmerCount(vector<string> &seqs, vector<string> &permutations , in
     int countKmereSj[max_combinations+1] = {0};
     // Comparing example Ri with R(i+1) until Rn
     for(i =  0; i < numberOfSequences - 1; i++){
+        permutationsCountAll(seqs[i], countKmereSi, max_combinations, k);
         for(j = i + 1; j < numberOfSequences; j++){
             //if(i >= j)
             //    continue;
@@ -422,10 +424,45 @@ void sequentialKmerCount(vector<string> &seqs, vector<string> &permutations , in
             minimum = -1;
             aux =  getIdxTriangularMatrixRowMajorSeq(i +1 ,  (j - i), numberOfSequences);
             // obtiene el vector de la cuenta de todas las permutaciones.
-            permutationsCountAll(seqs[i], countKmereSi, max_combinations, k);
             permutationsCountAll(seqs[j], countKmereSj, max_combinations, k);
             for(p = 1; p <= max_combinations; p++){
                 minimum = min(countKmereSi[p], countKmereSj[p]);
+                sum += minimum;
+            }
+            distance = 1 - (float) sum / (minLength - k + 1);
+            distancesSequential[aux] = distance;
+            //printf("Distance #%ld\t%f (i=%d, j=%d)\n", aux, distance, i, j );
+            // distancesSequential[j][i] = distance;
+        }
+    }
+    return;
+}
+/*Versión 2: tarda menos pero utiliza más memoria*/
+void sequentialKmerCount2(vector<string> &seqs, vector<string> &permutations , int k){
+    string mers[4] = {"A","C","G","T"};
+    long numberOfSequences = seqs.size();
+    // |kmers| is at most 4**k = 4**3 = 64
+    int max_combinations = pow(4,k);
+    float distance;
+    long sum;
+    long minimum;
+    long minLength;
+    long i,j,p;
+    long aux;
+    int **countKmeres = new int*[numberOfSequences];
+    // Getting distance of each kmere of each sequence
+    for(i =  0; i < numberOfSequences; i++){
+        countKmeres[i] = new int[max_combinations+1];
+        permutationsCountAll(seqs[i], countKmeres[i], max_combinations, k);
+    }
+    for(i =  0; i < numberOfSequences - 1; i++){
+        for(j = i + 1; j < numberOfSequences; j++){
+            minLength = min(seqs[i].size() - 1, seqs[j].size() - 1);
+            sum = 0;
+            minimum = -1;
+            aux =  getIdxTriangularMatrixRowMajorSeq(i +1 ,  (j - i), numberOfSequences);
+            for(p = 1; p <= max_combinations; p++){
+                minimum = min(countKmeres[i][p], countKmeres[j][p]);
                 sum += minimum;
             }
             distance = 1 - (float) sum / (minLength - k + 1);
