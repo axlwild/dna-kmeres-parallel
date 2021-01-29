@@ -77,8 +77,6 @@ __global__ void minKmeres1(int *sums, float *mins, int num_seqs, int current_seq
 
 
 __global__ void minKmeres2(int *sums, float *mins, int num_seqs, int current_seq, int* indexes){
-    // guardamos en memoria compartida
-    // los kmeros de la entrada actual
     __shared__ int current_seq_kmeres[PERMS_KMERES];
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int idxGap = idx + current_seq ;
@@ -90,37 +88,27 @@ __global__ void minKmeres2(int *sums, float *mins, int num_seqs, int current_seq
     int entryLength;
     int compLength;
     if(idxGap > current_seq && idxGap < num_seqs){
-        //printf("idx %d. Current seq: %d, num_seqs: %d\n", idxGap, current_seq, num_seqs);
-        //if(idx == 46343){
         float sumMins = 0;
         entryLength = indexes[current_seq + 1] -  indexes[current_seq] - 1;
         compLength = indexes[idxGap + 1] -  indexes[idxGap] -1;
-
         if (entryLength < compLength)
             compLength = entryLength;
         for(int i = 0; i < PERMS_KMERES; i++){
             sumMins += min(current_seq_kmeres[i], sums[idxGap+num_seqs*i]);
         }
-        //float sumbefore = sumMins;
         sumMins = 1 - sumMins/((compLength) - K + 1);
-        //printf("Input #%d min_size %d, sum_mins=%f, before: %f\n", idx, compLength, sumMins, sumbefore);
         long aux = getIdxTriangularMatrixRowMajor(current_seq+1, idxGap - current_seq , (long)num_seqs);
-        //  aux = getIdxTriangularMatrixRowMajor(1, 10001 , (long)num_seqs);
-
         mins[aux] = sumMins;
     }
 }
 
 
 
-// intento 1: .350 [s]
 __global__ void sumKmereCoincidencesGlobalMemory(char *data, int *indices, unsigned num_seqs, int *sum){
     // each block is comparing a sample with others
-    //int idx = threadIdx.x+blockDim.x*blockIdx.x;
     int entry = blockIdx.x;
     // Each thread count all coincidences of a k-mere combination.
     int k_mere = threadIdx.x;
-    //printf("outside blockid: %d \n", blockIdx.x);
     if ((entry < num_seqs) && (threadIdx.x < PERMS_KMERES)){
         // Fase uno: sumamos todos los valores de la suma de los k-meros de cada entrada.
         // Cada bloque se encarga de cada cadena de entrada
@@ -130,27 +118,19 @@ __global__ void sumKmereCoincidencesGlobalMemory(char *data, int *indices, unsig
         int entryLength = indices[entry + 1] -  indices[entry];
         // entonces iteramos por cada letra de la entrada hasta la N-k (los índices).
         // Podríamos guardar los índices en memoria constante para agilizar la lectura...
-        bool is_same_kmere = true;
         char * sequence = data+indices[entry];
-        //if (threadIdx.x == 0) printf("Sequence #%d: %s\n", entry, sequence);
         char currentSubstringFromSample[4];
+        int counter = 0;
         for (int i = 0; i < entryLength-3; i++){
             memcpy( currentSubstringFromSample, &sequence[i], 3 );
             currentSubstringFromSample[3] = '\0';
-            is_same_kmere = true;
-            for(int j = 0; j < 3; j++){
-                if (currentSubstringFromSample[j] == currentKmere[j]){
-                    continue;
-                }
-                is_same_kmere = false;
-                break;
-            }
-            if(is_same_kmere){
-                //printf("Entry(%d) + num_seqs(%d)* kmere(%d) = %d\n", entry, num_seqs, k_mere, entry+num_seqs*k_mere);
-                sum[entry+num_seqs*k_mere] += 1;
+            if ((currentSubstringFromSample[0] == currentKmere[0] &&
+                    (currentSubstringFromSample[1] == currentKmere[1] &&
+                            (currentSubstringFromSample[2] == currentKmere[2])))){
+                counter++;
             }
         }
-        __syncthreads();
+        sum[entry+num_seqs*k_mere] = counter;
     }
 }
 
