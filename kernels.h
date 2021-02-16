@@ -14,7 +14,7 @@
 #endif
 
 // number of permutations of RNA K_meres and k-value
-__constant__ char c_perms[64][4] = {
+__constant__ char c_perms[PERMS_KMERES][4] = {
         "AAA", "AAC", "AAG","AAT",
         "ACA", "ACC", "ACG","ACT",
         "AGA", "AGC", "AGG", "AGT",
@@ -118,6 +118,9 @@ __global__ void sumKmereCoincidencesGlobalMemory(char *data, int *indices, unsig
         int entryLength = indices[entry + 1] -  indices[entry];
         // entonces iteramos por cada letra de la entrada hasta la N-k (los índices).
         // Podríamos guardar los índices en memoria constante para agilizar la lectura...
+
+
+        // Si ponemos sequence como memoria compartida, podríamos cachar cadenas más grandes...
         char * sequence = data+indices[entry];
         char currentSubstringFromSample[4];
         int counter = 0;

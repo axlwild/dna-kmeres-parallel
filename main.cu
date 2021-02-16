@@ -14,6 +14,7 @@
 #include "utils.h"
 #include <map>
 #include "kernels.h"
+#include "utils.cpp"
 
 #ifndef PERMS_KMERES
 #define PERMS_KMERES 64
@@ -22,7 +23,7 @@
 #define K 3
 #endif
 
-#define THREADS 128
+#define THREADS 64
 #define N (54018*1024*128)
 #define PRINT_ANSWERS false
 #define PRINT_ANSWERS_FILE true
@@ -35,14 +36,21 @@ int          numberOfSequenses = 0;
 unsigned int size_all_seqs = 0;
 
 long threads = THREADS;
-long blocks = 65534;
+//long blocks = 32768; // 2.61
+//long blocks = 30000; // 2.32
+//long blocks = 5000; // 2.0511
+long blocks = 1000; // 2.012
+
+
 int threadsStep1 = PERMS_KMERES;
 int blockThread1 = BLOCKS_STEP_1;
 bool bug_log = false;
 //string file = "/home/acervantes/kmerDist/plants.fasta";
-string file = "/home/acervantes/kmerDist/all_seqs.fasta";
+//string file = "/home/acervantes/kmerDist/all_seqs.fasta";
+string file = "/home/acervantes/kmerDist/genomic.fna";
 // Method definition
 void importSeqs(string inputFile);
+void importSeqsNoNL(string inputFile);
 
 void printSeqs();
 void getPermutations(char *str, char* permutations, int last, int index);
@@ -67,8 +75,22 @@ long minsSize;
 long resultsArraySize;
 
 
+// 4 cadenas sería 1 bit
+// 1111 1111 = 1 byte
+// 00 -> A
+// 01 -> C
+// 10 -> G
+// 11 -> T
 
-char perms[64][4] = {
+// AACG -> 00000110
+// AACGA -> 00000110 00__ ____
+
+
+
+
+
+
+char perms[PERMS_KMERES][4] = {
         "AAA", "AAC", "AAG","AAT",
         "ACA", "ACC", "ACG","ACT",
         "AGA", "AGC", "AGG", "AGT",
@@ -97,17 +119,21 @@ vector<string> permutationsList (perms, end(perms));
 float * distancesSequential;
 
 int main() {
-    for(int i = 0; i<64; i++)
+    for(int i = 0; i<PERMS_KMERES; i++)
         permutationsMap[perms[i]] = i+1;
+
     //char permutations[len];
     // absolute path of the input data
-    importSeqs(file);
+    //importSeqs(file);
+    importSeqsNoNL(file);
     resultsArraySize = numberOfSequenses*(numberOfSequenses+1) / 2 - numberOfSequenses;
     std::cout << "Size all seqs:" << size_all_seqs << std::endl;
+    std::cout << seqs.size() << " sequences read ." << std::endl;
+
     doSequentialKmereDistance();
     printf("\n\aParallel:\n");
     // Device allocation
-    doParallelKmereDistance();
+    //doParallelKmereDistance();
     return 0;
 }
 
@@ -263,10 +289,7 @@ void doParallelKmereDistance(){
     // ejecutando kernel 374 ms
     cudaEventRecord(start, nullptr);
     for(int i = 0; i < numberOfSequenses; i++){
-        if (i == 60)
-            minKmeres2<<<blocks, 64>>>(sums, mins, numberOfSequenses, i, indexes);
-        else
-            minKmeres2<<<blocks, threads>>>(sums, mins, numberOfSequenses, i, indexes);
+        minKmeres2<<<blocks, threads>>>(sums, mins, numberOfSequenses, i, indexes);
         cudaDeviceSynchronize();
         err_ = cudaGetLastError();
         if (err_){
@@ -339,6 +362,79 @@ void doParallelKmereDistance(){
 
 }
 
+void importSeqsNoNL(string inputFile){
+    int indexCounter = 0;
+    ifstream input(inputFile);
+    if (!input.good()) {
+        std::cerr << "Error opening: " << inputFile << " . Check your file or pathh." << std::endl;
+        exit(0);
+    }
+    string line;
+    string acc = "";
+    string globalAcc = "";
+    bool newSeq = false;
+
+    // Iterate over all secuences
+    while (getline(input, line)) {
+        // line may be empty so you *must* ignore blank lines
+        // or you have a crash waiting to happen with line[0]
+        if(line.empty()){
+            continue;
+        }
+        //read the header of
+        if (line[0] == '>') {
+            // store id
+            ids.push_back(line);
+            newSeq = true;
+            continue;
+        }
+        if (newSeq) {
+            newSeq = false;
+            acc = line;
+            while (getline(input, line)) {
+                if(line[0] == '>') newSeq = true;
+                if(line.empty() || line[0] == 13 || line[0] == '>'){
+                    acc += "|";
+                    seqs.push_back(acc);
+                    indexes_aux.push_back(indexCounter);
+                    indexCounter += acc.size();
+                    globalAcc += acc;
+                    acc = "";
+                    break;
+                }
+                acc += line;
+                if(seqs.size() >= MAX_SEQS) break;
+            }
+            if (acc != ""){
+                acc += "|";
+                seqs.push_back(acc);
+                indexes_aux.push_back(indexCounter);
+                indexCounter += acc.size();
+                globalAcc += acc;
+                acc = "";
+                indexes_aux.push_back(indexCounter);
+                if(seqs.size() >= MAX_SEQS) break;
+            }
+        }
+    }
+    int last_index = indexes_aux.size();
+    numberOfSequenses = seqs.size();
+    size_all_seqs = globalAcc.size()*sizeof(char);
+    cudaError_t error;
+    error = cudaMallocManaged(&data, size_all_seqs);
+    if (error){
+        printf("Error #%d allocating device memory with data.", error);
+        exit(1);
+    }
+    for(int i = 0; i < globalAcc.size(); i++){
+        if (globalAcc[i] == '|'){
+            data[i] = '\0';
+            continue;
+        }
+        data[i] = globalAcc[i];
+    }
+    return;
+}
 void importSeqs(string inputFile){
     int indexCounter = 0;
     ifstream input(inputFile);
