@@ -5,7 +5,7 @@
       <paths name="Server GPU (a00ee6e6-7143-4497-bae0-92e78895b777)">
         <serverdata>
           <mappings>
-            <mapping deploy="/tmp/tmp.QactJtvD3k" local="$PROJECT_DIR$" />
+            <mapping deploy="/home/acervantes/deployment" local="$PROJECT_DIR$" />
           </mappings>
           <excludedPaths>
             <excludedPath local="true" path="$PROJECT_DIR$/cmake-build-debug" />

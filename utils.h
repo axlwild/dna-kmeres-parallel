@@ -9,20 +9,22 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <map>
 
 
 
 /**
  * @param alphabet: string with all the alphabet letters.
  * @param length: length of permutated strings.
+ * @param permutations: results buffer.
  */
-void permutation(char * alphabet, int length)
+void permutation(const char * alphabet, int length, char** permutations)
 {
     int sizeAlphabet = strlen(alphabet);
     int permsSize    = pow(sizeAlphabet, length);
-    char ** permutations = (char**) malloc(permsSize * sizeof(char*));
-    for(int i = 0; i < permsSize; i++)
-        permutations[i] = (char*) malloc(length*sizeof(char));
+    //permutations = (char**) malloc(permsSize * sizeof(char*));
+    //for(int i = 0; i < permsSize; i++)
+    //    permutations[i] = (char*) malloc(length*sizeof(char));
     int * letterIdx = (int*) calloc(length, sizeof(int));
 
     for(int i = 0; i < permsSize; i++){

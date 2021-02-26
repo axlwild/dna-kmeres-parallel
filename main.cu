@@ -19,9 +19,7 @@
 #ifndef PERMS_KMERES
 #define PERMS_KMERES 64
 #endif
-#ifndef K
-#define K 3
-#endif
+
 
 #define THREADS 64
 #define N (54018*1024*128)
@@ -29,7 +27,8 @@
 #define PRINT_ANSWERS_FILE true
 
 #define BLOCKS_STEP_1 54018
-#define MAX_SEQS 40000
+#define MAX_SEQS 100
+#define VERBOSE true
 
 using namespace std;
 int          numberOfSequenses = 0;
@@ -46,8 +45,9 @@ int threadsStep1 = PERMS_KMERES;
 int blockThread1 = BLOCKS_STEP_1;
 bool bug_log = false;
 //string file = "/home/acervantes/kmerDist/plants.fasta";
-//string file = "/home/acervantes/kmerDist/all_seqs.fasta";
-string file = "/home/acervantes/kmerDist/genomic.fna";
+string file = "/home/acervantes/kmerDist/all_seqs.fasta";
+// to run this, execute importSeqsNoNL.
+//string file = "/home/acervantes/kmerDist/genomic.fna";
 // Method definition
 void importSeqs(string inputFile);
 void importSeqsNoNL(string inputFile);
@@ -85,11 +85,9 @@ long resultsArraySize;
 // AACG -> 00000110
 // AACGA -> 00000110 00__ ____
 
-
-
-
-
-
+//__constant__ char c_perms[][4];
+char perms[PERMS_KMERES][4];
+/*
 char perms[PERMS_KMERES][4] = {
         "AAA", "AAC", "AAG","AAT",
         "ACA", "ACC", "ACG","ACT",
@@ -111,6 +109,7 @@ char perms[PERMS_KMERES][4] = {
         "TGA", "TGC", "TGG", "TGT",
         "TTA", "TTC", "TTG", "TTT",
 };
+ */
 std::map<std::string, int> permutationsMap;
 
 
@@ -119,10 +118,30 @@ vector<string> permutationsList (perms, end(perms));
 float * distancesSequential;
 
 int main() {
-    for(int i = 0; i<PERMS_KMERES; i++)
+    for(int i = 0; i < PERMS_KMERES; i++)
         permutationsMap[perms[i]] = i+1;
+    const char *alphabet = "ACGT";
+    int sizeAlphabet = 4;
+    int permsSize    = pow(sizeAlphabet, K);
+    char **permutations = (char**) malloc(permsSize * sizeof(char*));
+    for(int i = 0; i < permsSize; i++)
+        permutations[i] = (char*) malloc(K*sizeof(char));
+    permutation(alphabet, K, permutations);
+    /*
+     * For k = 3 and |alphabet| = 4
+     * we need we need 4**3 combinations size 3
+     * 64 combinations size 3+1 bytes (end of string)
+     * 192 bytes
+     * */
+    // We need to copy permutations to device constant memory
+    // 65536 max constant memory
+    if (VERBOSE){
+        std::cout << "K = " << K << std::endl;
+        std::cout << "Allocated " << PERMS_KMERES * sizeof(char) * 4 << "/65536 bytes allocated" << std::endl;
+    }
 
-    //char permutations[len];
+    // TODO: asignación dinámica para valores mayores a K=6
+    cudaMemcpyToSymbol(c_perms, permutations, PERMS_KMERES*sizeof(char));
     // absolute path of the input data
     //importSeqs(file);
     importSeqsNoNL(file);
@@ -133,7 +152,7 @@ int main() {
     doSequentialKmereDistance();
     printf("\n\aParallel:\n");
     // Device allocation
-    //doParallelKmereDistance();
+    doParallelKmereDistance();
     return 0;
 }
 
