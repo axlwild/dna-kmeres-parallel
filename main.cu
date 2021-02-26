@@ -269,8 +269,12 @@ void doParallelKmereDistance(){
      * */
     cudaEventRecord(start, nullptr);
     cudaEventRecord(globalStart, nullptr);
+    // 54018 blocks and perm_kmeres threads
 
-    sumKmereCoincidencesGlobalMemory<<<blockThread1, threadsStep1>>>(data, indexes, numberOfSequenses, sums);
+    sumKmereCoincidencesGlobalMemory
+            <<<1,1>>>
+                (data, indexes, numberOfSequenses, sums);
+    //sumKmereCoincidencesGlobalMemory<<<blockThread1, threadsStep1>>>(data, indexes, numberOfSequenses, sums);
     cudaDeviceSynchronize();
     err_ = cudaGetLastError();
     if (err_)
@@ -306,9 +310,12 @@ void doParallelKmereDistance(){
     //minKmeres<<<blocks, 64>>>(d_sums, d_mins, numberOfSequenses);
     // sin ejecutar kernel tarda aprox 344 ms
     // ejecutando kernel 374 ms
-    cudaEventRecord(start, nullptr);
+    cuda    EventRecord(start, nullptr);
     for(int i = 0; i < numberOfSequenses; i++){
-        minKmeres2<<<blocks, threads>>>(sums, mins, numberOfSequenses, i, indexes);
+        // original: sin el break
+        //minKmeres2<<<blocks, threads>>>(sums, mins, numberOfSequenses, i, indexes);
+        minKmeres2<<<1, 1>>>(sums, mins, numberOfSequenses, i, indexes);
+        break;
         cudaDeviceSynchronize();
         err_ = cudaGetLastError();
         if (err_){
