@@ -86,7 +86,7 @@ long resultsArraySize;
 // AACGA -> 00000110 00__ ____
 
 //__constant__ char c_perms[][4];
-char perms[PERMS_KMERES][4];
+char perms[PERMS_KMERES][K+1];
 /*
 char perms[PERMS_KMERES][4] = {
         "AAA", "AAC", "AAG","AAT",
