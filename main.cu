@@ -26,8 +26,8 @@
 #define PRINT_ANSWERS false
 #define PRINT_ANSWERS_FILE true
 
-#define BLOCKS_STEP_1 54018
-#define MAX_SEQS 100
+#define BLOCKS_STEP_1 40000
+#define MAX_SEQS 1000
 #define VERBOSE true
 
 using namespace std;
@@ -40,22 +40,22 @@ long threads = THREADS;
 //long blocks = 5000; // 2.0511
 long blocks = 1000; // 2.012
 
-
-int threadsStep1 = PERMS_KMERES;
+// TODO: dinámico, si el número de hilos necesario es menor de 1024, usar esa cantidad
+int threadsStep1 = 1024;
 int blockThread1 = BLOCKS_STEP_1;
 bool bug_log = false;
-//string file = "/home/acervantes/kmerDist/plants.fasta";
-string file = "/home/acervantes/kmerDist/all_seqs.fasta";
+string file = "/home/acervantes/kmerDist/plants.fasta";
+//string file = "/home/acervantes/kmerDist/all_seqs.fasta";
 // to run this, execute importSeqsNoNL.
 //string file = "/home/acervantes/kmerDist/genomic.fna";
 // Method definition
-void importSeqs(string inputFile);
+void importSeqs(string inputFile); 
 void importSeqsNoNL(string inputFile);
 
 void printSeqs();
 void getPermutations(char *str, char* permutations, int last, int index);
-int permutationsCount(string permutation, string sequence, int k);
-void sequentialKmerCount(vector<string> &seqs, vector<string> &permutations , int k);
+
+
 void sequentialKmerCount2(vector<string> &seqs, vector<string> &permutations , int k);
 void doParallelKmereDistance();
 void doSequentialKmereDistance();
@@ -88,33 +88,11 @@ long resultsArraySize;
 //__constant__ char c_perms[][4];
 //char perms[PERMS_KMERES][K+1];
 
-char perms[PERMS_KMERES][K+1] = {
-        "AAA", "AAC", "AAG","AAT",
-        "ACA", "ACC", "ACG","ACT",
-        "AGA", "AGC", "AGG", "AGT",
-        "ATA", "ATC", "ATG", "ATT",
 
-        "CAA", "CAC", "CAG", "CAT",
-        "CCA", "CCC", "CCG", "CCT",
-        "CGA", "CGC", "CGG", "CGT",
-        "CTA", "CTC", "CTG", "CTT",
-
-        "GAA", "GAC", "GAG", "GAT",
-        "GCA", "GCC", "GCG", "GCT",
-        "GGA", "GGC", "GGG", "GGT",
-        "GTA", "GTC", "GTG", "GTT",
-
-        "TAA", "TAC", "TAG", "TAT",
-        "TCA", "TCC", "TCG", "TCT",
-        "TGA", "TGC", "TGG", "TGT",
-        "TTA", "TTC", "TTG", "TTT",
-};
 
 std::map<std::string, int> permutationsMap;
-
-
 vector<string> permutationsList;
-
+char **perms;
 float * distancesSequential;
 
 int main() {
@@ -122,7 +100,7 @@ int main() {
     const char *alphabet = "ACGT";
     int sizeAlphabet = 4;
     int permsSize    = pow(sizeAlphabet, K);
-    char **perms = (char**) malloc(permsSize * sizeof(char*));
+    perms = (char**) malloc(permsSize * sizeof(char*));
     for(int i = 0; i < permsSize; i++)
     {
         perms[i] = (char*) malloc((K+1)*sizeof(char));
@@ -143,19 +121,12 @@ int main() {
     // 65536 max constant memory
     if (VERBOSE){
         std::cout << "K = " << K << std::endl;
-        std::cout << "Allocated " << PERMS_KMERES * sizeof(char) * 4 << "/65536 bytes allocated" << std::endl;
+        std::cout << PERMS_KMERES * sizeof(char) * (K+1) << "/65536 bytes allocated" << std::endl;
+        std::cout << "Máximum " << MAX_WORDS << " words in constant memory" << std::endl;
+        std::cout << "(words size "<< K+1 << " bytes)";
+        
     }
 
-    // TODO: asignación dinámica para valores mayores a K=6
-    cudaError_t err;
-    for(int i = 0; i < PERMS_KMERES; i++){
-        // std::cout << "Copying:" << perms[i] << std::endl;
-        err = cudaMemcpyToSymbol(c_perms, perms[i], (K+1), i*(K+1));
-        if(err){
-            std::cout << "Error i= :" << i << " error #" << err << std::endl;
-            return 0;
-        }
-    }
 
 
 
@@ -269,7 +240,7 @@ void doParallelKmereDistance(){
     cudaEventCreate(&globalStart);
     cudaEventCreate(&globalStop);
 
-    printf("Running %ld blocks and %ld threads\n", blocks, threads);
+
     // Launch kernel
     //int smSize = 49152;
     //sumKmereCoincidences<<<blocks, threads, smSize>>>(d_data, d_indices, numberOfSequenses, d_sums);
@@ -286,12 +257,44 @@ void doParallelKmereDistance(){
      * */
     cudaEventRecord(start, nullptr);
     cudaEventRecord(globalStart, nullptr);
+    printf("Running %ld blocks and %ld threads\n", blocks, threads);
+    /***
+     *  Para evitar desborde de memoria compartida, se calendariza
+     *  el ciclo para alcanzar a procesar todos los kmeros.
+     *  Cada hilo analiza un kmero en memoria compartida.
+     *
+     */
+    // TODO: asignación dinámica para valores mayores a K=6
+    
 
-    sumKmereCoincidencesGlobalMemory<<<blockThread1, threadsStep1>>>(data, indexes, numberOfSequenses, sums);
-    cudaDeviceSynchronize();
-    err_ = cudaGetLastError();
-    if (err_)
-        printf("LastError sumCoincidences #%d\n", err_);
+    //for(int perm_offset = 0; perm_offset < PERMS_KMERES; perm_offset += MAX_WORDS){
+    for(int perm_offset = 0; perm_offset < 1 ; perm_offset += MAX_WORDS){
+        // Actualizamos los valores de las permutaciones de k-meros
+        for(int i = 0; i < MAX_WORDS && i < PERMS_KMERES; i++){
+            //std::cout << "Copying:" << perms[i] << std::endl;
+            err_ = cudaMemcpyToSymbol(c_perms, perms[i+perm_offset], (K+1), i*(K+1));
+            if(err_){
+                std::cout << "Error i=" << i << " OFFSET: " << perm_offset << " error #" << err_ << std::endl;
+                return;
+            }
+        }
+        // TODO: Si el número de permutaciones (MAX_WORDS) excede el número de hilos (1024), calendarizar también
+        sumKmereCoincidencesGlobalMemory<<<blockThread1, threadsStep1>>>
+                (data, indexes, numberOfSequenses, sums, perm_offset);
+        cudaDeviceSynchronize();
+        err_ = cudaGetLastError();
+        if (err_)
+            printf("LastError sumCoincidences #%d\n", err_);
+        else
+            printf("Running ok\n");
+        return;        
+    }
+    return;
+    // sumKmereCoincidencesGlobalMemory<<<blockThread1, threadsStep1>>>(data, indexes, numberOfSequenses, sums);
+    // cudaDeviceSynchronize();
+    // err_ = cudaGetLastError();
+    // if (err_)
+    //     printf("LastError sumCoincidences #%d\n", err_);
     cudaFree(data);
     cudaEventRecord(stop, nullptr);
     cudaEventSynchronize(stop);
@@ -325,12 +328,14 @@ void doParallelKmereDistance(){
     // ejecutando kernel 374 ms
     cudaEventRecord(start, nullptr);
     for(int i = 0; i < numberOfSequenses; i++){
-        minKmeres2<<<blocks, threads>>>(sums, mins, numberOfSequenses, i, indexes);
-        cudaDeviceSynchronize();
-        err_ = cudaGetLastError();
-        if (err_){
-            printf("LastError kmere dist: %d iteration %d\n", err_, i);
-            exit(1);
+        for(int perm_offset = 0; perm_offset < PERMS_KMERES; perm_offset += (int)MAX_SHARED_MEM / sizeof(int)){
+            minKmeres2<<<blocks, threads>>>(sums, mins, numberOfSequenses, i, indexes, perm_offset);
+            cudaDeviceSynchronize();
+            err_ = cudaGetLastError();
+            if (err_){
+                printf("LastError kmere dist: %d iteration %d\n", err_, i);
+                exit(1);
+            }
         }
     }
     cudaDeviceSynchronize();
@@ -543,46 +548,7 @@ void importSeqs(string inputFile){
     }
     return;
 }
-/*Versión secuencial 1: tarda más pero utiliza menos memoria*/
-void sequentialKmerCount(vector<string> &seqs, vector<string> &permutations , int k){
-    string mers[4] = {"A","C","G","T"};
-    long numberOfSequences = seqs.size();
-    // |kmers| is at most 4**k = 4**3 = 64
-    int max_combinations = pow(4,k);
-    float distance;
-    long sum;
-    long minimum;
-    long minLength;
-    long i,j,p;
-    long aux;
-    int countKmereSi[max_combinations+1] = {0};
-    int countKmereSj[max_combinations+1] = {0};
-    // Comparing example Ri with R(i+1) until Rn
-    for(i =  0; i < numberOfSequences - 1; i++){
-        permutationsCountAll(seqs[i], countKmereSi, max_combinations, k);
-        for(j = i + 1; j < numberOfSequences; j++){
-            //if(i >= j)
-            //    continue;
-            // iterating over permutations (distance of Ri an Rj).
-            //restamos uno por el | auxiliar que agregamos en todo al final
-            minLength = min(seqs[i].size() - 1, seqs[j].size() - 1);
-            sum = 0;
-            minimum = -1;
-            aux =  getIdxTriangularMatrixRowMajorSeq(i +1 ,  (j - i), numberOfSequences);
-            // obtiene el vector de la cuenta de todas las permutaciones.
-            permutationsCountAll(seqs[j], countKmereSj, max_combinations, k);
-            for(p = 1; p <= max_combinations; p++){
-                minimum = min(countKmereSi[p], countKmereSj[p]);
-                sum += minimum;
-            }
-            distance = 1 - (float) sum / (minLength - k + 1);
-            distancesSequential[aux] = distance;
-            //printf("Distance #%ld\t%f (i=%d, j=%d)\n", aux, distance, i, j );
-            // distancesSequential[j][i] = distance;
-        }
-    }
-    return;
-}
+
 /*Versión 2: tarda menos pero utiliza más memoria*/
 void sequentialKmerCount2(vector<string> &seqs, vector<string> &permutations , int k){
     string mers[4] = {"A","C","G","T"};
@@ -620,18 +586,7 @@ void sequentialKmerCount2(vector<string> &seqs, vector<string> &permutations , i
     return;
 }
 
-int permutationsCount(string permutation, string sequence, int k){
-    int sequence_len = sequence.size();
-    int counter = 0;
-    string current_kmere;
-    for(int i = 0; i < sequence_len - k; i++){
-        current_kmere = sequence.substr(i,k);
-        if (permutation.compare(current_kmere) == 0){
-            counter++;
-        }
-    }
-    return counter;
-}
+
 
 void permutationsCountAll(string sequence, int * countResults, int max_combinations, int k){
     int sequence_len = sequence.size();
