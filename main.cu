@@ -86,9 +86,9 @@ long resultsArraySize;
 // AACGA -> 00000110 00__ ____
 
 //__constant__ char c_perms[][4];
-char perms[PERMS_KMERES][K+1];
-/*
-char perms[PERMS_KMERES][4] = {
+//char perms[PERMS_KMERES][K+1];
+
+char perms[PERMS_KMERES][K+1] = {
         "AAA", "AAC", "AAG","AAT",
         "ACA", "ACC", "ACG","ACT",
         "AGA", "AGC", "AGG", "AGT",
@@ -109,24 +109,30 @@ char perms[PERMS_KMERES][4] = {
         "TGA", "TGC", "TGG", "TGT",
         "TTA", "TTC", "TTG", "TTT",
 };
- */
+
 std::map<std::string, int> permutationsMap;
 
 
-vector<string> permutationsList (perms, end(perms));
+vector<string> permutationsList;
 
 float * distancesSequential;
 
 int main() {
-    for(int i = 0; i < PERMS_KMERES; i++)
-        permutationsMap[perms[i]] = i+1;
+
     const char *alphabet = "ACGT";
     int sizeAlphabet = 4;
     int permsSize    = pow(sizeAlphabet, K);
-    char **permutations = (char**) malloc(permsSize * sizeof(char*));
+    char **perms = (char**) malloc(permsSize * sizeof(char*));
     for(int i = 0; i < permsSize; i++)
-        permutations[i] = (char*) malloc(K*sizeof(char));
-    permutation(alphabet, K, permutations);
+    {
+        perms[i] = (char*) malloc((K+1)*sizeof(char));
+    }
+    permutation(alphabet, K, perms);
+    for(int i = 0; i < permsSize; i++){
+        permutationsList.push_back(perms[i]);
+    }
+    for(int i = 0; i < PERMS_KMERES; i++)
+        permutationsMap[perms[i]] = i+1;
     /*
      * For k = 3 and |alphabet| = 4
      * we need we need 4**3 combinations size 3
@@ -141,10 +147,21 @@ int main() {
     }
 
     // TODO: asignación dinámica para valores mayores a K=6
-    cudaMemcpyToSymbol(c_perms, permutations, PERMS_KMERES*sizeof(char));
+    cudaError_t err;
+    for(int i = 0; i < PERMS_KMERES; i++){
+        // std::cout << "Copying:" << perms[i] << std::endl;
+        err = cudaMemcpyToSymbol(c_perms, perms[i], (K+1), i*(K+1));
+        if(err){
+            std::cout << "Error i= :" << i << " error #" << err << std::endl;
+            return 0;
+        }
+    }
+
+
+
     // absolute path of the input data
-    //importSeqs(file);
-    importSeqsNoNL(file);
+    importSeqs(file);
+    //importSeqsNoNL(file);
     resultsArraySize = numberOfSequenses*(numberOfSequenses+1) / 2 - numberOfSequenses;
     std::cout << "Size all seqs:" << size_all_seqs << std::endl;
     std::cout << seqs.size() << " sequences read ." << std::endl;

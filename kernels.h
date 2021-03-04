@@ -11,15 +11,37 @@
 #ifndef K
 // la limitación de K se da más por la memoria compartida que por la constante.
 // ya que usamos int para el contador en memoria compartida
-#define K 4
+#define K 3
 #endif
 
 #ifndef PERMS_KMERES
 #define PERMS_KMERES (1 << (K*2))
 #endif
 // number of permutations of RNA K_meres and k-value
-__constant__ char c_perms[PERMS_KMERES][4] ;
+__constant__ char c_perms[PERMS_KMERES][K+1];
+/*
+__constant__ char c_perms[PERMS_KMERES][4] = {
+        "AAA", "AAC", "AAG","AAT",
+        "ACA", "ACC", "ACG","ACT",
+        "AGA", "AGC", "AGG", "AGT",
+        "ATA", "ATC", "ATG", "ATT",
 
+        "CAA", "CAC", "CAG", "CAT",
+        "CCA", "CCC", "CCG", "CCT",
+        "CGA", "CGC", "CGG", "CGT",
+        "CTA", "CTC", "CTG", "CTT",
+
+        "GAA", "GAC", "GAG", "GAT",
+        "GCA", "GCC", "GCG", "GCT",
+        "GGA", "GGC", "GGG", "GGT",
+        "GTA", "GTC", "GTG", "GTT",
+
+        "TAA", "TAC", "TAG", "TAT",
+        "TCA", "TCC", "TCG", "TCT",
+        "TGA", "TGC", "TGG", "TGT",
+        "TTA", "TTC", "TTG", "TTT",
+};
+*/
 // https://www.geeksforgeeks.org/convert-given-upper-triangular-matrix-to-1d-array/
 __device__ __host__ long getIdxTriangularMatrixRowMajor(long i, long j, long n){
     return (n * (i - 1) - (((i - 2) * (i - 1)) / 2)) + (j - i);
