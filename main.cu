@@ -37,11 +37,10 @@ long threads = THREADS;
 //long blocks = 5000; // 2.0511
 long blocks = 1000; // 2.012
 
-// TODO: dinámico, si el número de hilos necesario es menor de MAX_THREADS, usar esa cantidad
 int threadsStep1 = MAX_THREADS;
 int blockThread1 = BLOCKS_STEP_1;
 bool bug_log = false;
-string file = "/home/acervantes/kmerDist/plants.fasta";
+string file = "/home/acervantes/kmerDist/plants_mod.fasta";
 //string file = "/home/acervantes/kmerDist/all_seqs.fasta";
 // to run this, execute importSeqsNoNL.
 //string file = "/home/acervantes/kmerDist/genomic.fna";
@@ -267,7 +266,6 @@ void doParallelKmereDistance(){
      *  Cada hilo analiza un kmero en memoria compartida.
      *
      */
-    // TODO: asignación dinámica para valores mayores a K=6
     
 
     //for(int perm_offset = 0; perm_offset < PERMS_KMERES; perm_offset += MAX_WORDS){
@@ -287,8 +285,9 @@ void doParallelKmereDistance(){
                 threadsStep1 = MAX_THREADS;
             else
                 threadsStep1 = MAX_WORDS - j;
+            //std::cout << "Step 1 with offset " << perm_offset+j << std::endl;
             sumKmereCoincidencesGlobalMemory<<<blockThread1, threadsStep1>>>
-                (data, indexes, numberOfSequenses, sums, perm_offset+MAX_THREADS*j);
+                (data, indexes, numberOfSequenses, sums, perm_offset+j);
             cudaDeviceSynchronize();
             err_ =  cudaGetLastError();
             if (err_){
@@ -311,16 +310,17 @@ void doParallelKmereDistance(){
     float parallelTimer = 0;
     cudaEventElapsedTime(&parallelTimer, start, stop);
     cout<< "Elapsed parallel timer step 1: " << parallelTimer << " ms, " << parallelTimer / 1000 << " secs" <<endl;
-    // //float sumcheck = 0;
+    // float sumcheck = 0;
     // printf("Sums:\n");
     // for(int j = 0, idx = 0; j < PERMS_KMERES; j++){
-    //     printf("%d: ", j);
-    //     //sumcheck += sums[idx];
+    //     printf("%s\t(%d): ", perms[j],j);
+    //     sumcheck += sums[idx];
     //     for(int i = 0; i < numberOfSequenses; i++){
     //         printf("%d,\t", sums[idx++]);
     //     }
     //     printf("\n");
     // }
+    // printf("Sumcheck: %f\n", sumcheck);
 
     /**
      * Paso 2: calcular las distancias de todo vs todo.
@@ -340,9 +340,18 @@ void doParallelKmereDistance(){
     // ejecutando kernel 374 ms
     cudaEventRecord(start, nullptr);
     for(int i = 0; i < numberOfSequenses; i++){
-        for(int perm_offset = 0; perm_offset < PERMS_KMERES ; perm_offset += MAX_SHARED_INT){
-            //printf("Executing second step...\n");
-            minKmeres2<<<blocks, threads>>>(sums, mins, numberOfSequenses, i, indexes, perm_offset);
+        bool finalStep = false;
+        //printf("Loop...\n");
+        for(int perm_offset = 0; perm_offset < PERMS_KMERES ; perm_offset += THREADS){
+            // Al ejecutarse solo alcanza a guardar en memoria compartida 1024 elementos como máximo.
+            // Si quisiéramos guardar más elemtos que esos, no podemos. Tendríamos qué ejecutar de nuevo.
+            
+            finalStep = (perm_offset + THREADS >= PERMS_KMERES);
+            // printf("Executing second step...\n");
+            // if(finalStep){
+            //     printf("Final step...\n");
+            // }
+            minKmeres2<<<blocks, threads>>>(sums, mins, numberOfSequenses, i, indexes, perm_offset, finalStep);
             cudaDeviceSynchronize();
             err_ = cudaGetLastError();
             if (err_){

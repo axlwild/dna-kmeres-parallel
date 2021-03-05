@@ -89,12 +89,12 @@ __global__ void minKmeres1(int *sums, float *mins, int num_seqs, int current_seq
 }
 
 
-__global__ void minKmeres2(int *sums, float *mins, int num_seqs, int current_seq, int* indexes, int perm_offset){
-    __shared__ int current_seq_kmeres[MAX_SHARED_INT]; // current_seq_kmeres[PERMS_KMERES];
+__global__ void minKmeres2(int *sums, float *mins, int num_seqs, int current_seq, int* indexes, int perm_offset, bool final){
+    __shared__ int current_seq_kmeres[MAX_THREADS]; // current_seq_kmeres[PERMS_KMERES];
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int idxGap = idx + current_seq ;
     int tid = threadIdx.x + perm_offset;
-    if(tid < PERMS_KMERES && (tid - perm_offset) < MAX_SHARED_INT){
+    if(tid < PERMS_KMERES && (tid - perm_offset) < MAX_THREADS){
         current_seq_kmeres[threadIdx.x] = sums[tid*num_seqs+current_seq];
     }
     __syncthreads();
@@ -107,14 +107,13 @@ __global__ void minKmeres2(int *sums, float *mins, int num_seqs, int current_seq
         if (entryLength < compLength)
             compLength = entryLength;
         long aux = getIdxTriangularMatrixRowMajor(current_seq+1, idxGap - current_seq , (long)num_seqs);
-        // TODO: checar si el límite de PERMS_KMERES es correcto
-        for(int i = 0; i < PERMS_KMERES && i < MAX_SHARED_INT; i++){
-            // if(aux == 0){
-            //     if(current_seq_kmeres[i] != sums[idxGap+num_seqs*i]){ 
-            //         printf("idx:%d\tsumsIdx:%d\t(idxGap:%d)\n",i, idxGap+num_seqs*i, idxGap);
-            //         printf("%d\t%d\n\n",current_seq_kmeres[i], sums[idxGap+num_seqs*i]);
-            //     }
-            // }
+        for(int i = 0; i < PERMS_KMERES && i < MAX_THREADS; i++){
+            if(aux == 0 && perm_offset > 0){
+                if(current_seq_kmeres[i] != sums[idxGap+num_seqs*i]){ 
+                    printf("idx:%d\tsumsIdx:%d\t(idxGap:%d)\n",i, idxGap+num_seqs*i, idxGap);
+                    printf("%d\t%d\n\n",current_seq_kmeres[i], sums[idxGap+num_seqs*i]);
+                }
+            }
             if(current_seq_kmeres[i] <= sums[idxGap+num_seqs*i])
                 sumMins += current_seq_kmeres[i];
             else 
@@ -124,13 +123,26 @@ __global__ void minKmeres2(int *sums, float *mins, int num_seqs, int current_seq
         //     printf("compLength: %d\n", compLength);
         //     printf("sumMins: %f\n", sumMins);
         // }
-        sumMins = 1 - sumMins/((compLength) - K + 1);
+        
         // if(aux == 0){
         //     printf("Zero in idx: %d, currSeq: %d, tid: %d\n", idx, current_seq, tid);
         //     printf("Summins: %f\n", sumMins);
         //     printf("numSeqs: %d\n", num_seqs);
         // }
-        mins[aux] = sumMins;
+        //TODO: esto solo se debería de hacer en la última iteración
+        // if(final)
+        //     mins[aux] = 1 - (sumMins + mins[aux])/((compLength) - K + 1);
+        // else
+        
+        if(final){
+            mins[aux] = 1 - (mins[aux] + sumMins)/((compLength) - K + 1);
+        }
+        else{
+            mins[aux] += sumMins;   
+        }
+        // if(aux == 0){
+        //     if(final) printf("Final Mins[0]: %f\n", mins[0]);
+        // }
     }
 }
 
