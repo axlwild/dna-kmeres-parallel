@@ -20,8 +20,11 @@
 // max shared memory per block
 #define MAX_SHARED_MEM 49152
 #define MAX_CONSTANT_MEM 65536
+// Número máximo de palabras que pueden caber en memoria constante
 #define MAX_WORDS MAX_SHARED_MEM / (K+1)
-
+#define MAX_SHARED_INT MAX_SHARED_MEM / sizeof(int)
+#define MAX_THREADS 1024
+#define THREADS min(PERMS_KMERES, 1024)
 // number of permutations of RNA K_meres and k-value
 __constant__ char c_perms[MAX_WORDS][K+1];
 /*
@@ -38,7 +41,7 @@ __constant__ char c_perms[PERMS_KMERES][4] = {
 
         "GAA", "GAC", "GAG", "GAT",
         "GCA", "GCC", "GCG", "GCT",
-        "GGA", "GGC", "GGG", "GGT",
+        "GGA", "GGC", "GGG", "GGT", 
         "GTA", "GTC", "GTG", "GTT",
 
         "TAA", "TAC", "TAG", "TAT",
@@ -66,7 +69,6 @@ __global__ void minKmeres1(int *sums, float *mins, int num_seqs, int current_seq
     int entryLength;
     int compLength;
     if(idx > current_seq && idx < num_seqs){
-        //if(idx == 46343){
         float sumMins = 0;
         entryLength = indexes[current_seq +1] -  indexes[current_seq] - 1;
         compLength = indexes[idx + 1] -  indexes[idx] -1;
@@ -88,12 +90,12 @@ __global__ void minKmeres1(int *sums, float *mins, int num_seqs, int current_seq
 
 
 __global__ void minKmeres2(int *sums, float *mins, int num_seqs, int current_seq, int* indexes, int perm_offset){
-    __shared__ int current_seq_kmeres[(int)(MAX_SHARED_MEM / sizeof(int))];
+    __shared__ int current_seq_kmeres[MAX_SHARED_INT]; // current_seq_kmeres[PERMS_KMERES];
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int idxGap = idx + current_seq ;
     int tid = threadIdx.x + perm_offset;
-    if(tid < PERMS_KMERES && (tid - perm_offset) < MAX_SHARED_MEM){
-        current_seq_kmeres[tid] = sums[tid*num_seqs+current_seq];
+    if(tid < PERMS_KMERES && (tid - perm_offset) < MAX_SHARED_INT){
+        current_seq_kmeres[threadIdx.x] = sums[tid*num_seqs+current_seq];
     }
     __syncthreads();
     int entryLength;
@@ -104,11 +106,30 @@ __global__ void minKmeres2(int *sums, float *mins, int num_seqs, int current_seq
         compLength = indexes[idxGap + 1] -  indexes[idxGap] -1;
         if (entryLength < compLength)
             compLength = entryLength;
-        for(int i = 0; i < PERMS_KMERES; i++){
-            sumMins += min(current_seq_kmeres[i], sums[idxGap+num_seqs*i]);
-        }
-        sumMins = 1 - sumMins/((compLength) - K + 1);
         long aux = getIdxTriangularMatrixRowMajor(current_seq+1, idxGap - current_seq , (long)num_seqs);
+        // TODO: checar si el límite de PERMS_KMERES es correcto
+        for(int i = 0; i < PERMS_KMERES && i < MAX_SHARED_INT; i++){
+            // if(aux == 0){
+            //     if(current_seq_kmeres[i] != sums[idxGap+num_seqs*i]){ 
+            //         printf("idx:%d\tsumsIdx:%d\t(idxGap:%d)\n",i, idxGap+num_seqs*i, idxGap);
+            //         printf("%d\t%d\n\n",current_seq_kmeres[i], sums[idxGap+num_seqs*i]);
+            //     }
+            // }
+            if(current_seq_kmeres[i] <= sums[idxGap+num_seqs*i])
+                sumMins += current_seq_kmeres[i];
+            else 
+                sumMins += sums[idxGap+num_seqs*i];
+        }
+        // if(aux == 0){
+        //     printf("compLength: %d\n", compLength);
+        //     printf("sumMins: %f\n", sumMins);
+        // }
+        sumMins = 1 - sumMins/((compLength) - K + 1);
+        // if(aux == 0){
+        //     printf("Zero in idx: %d, currSeq: %d, tid: %d\n", idx, current_seq, tid);
+        //     printf("Summins: %f\n", sumMins);
+        //     printf("numSeqs: %d\n", num_seqs);
+        // }
         mins[aux] = sumMins;
     }
 }
@@ -116,7 +137,6 @@ __global__ void minKmeres2(int *sums, float *mins, int num_seqs, int current_seq
 
 
 __global__ void sumKmereCoincidencesGlobalMemory(char *data, int *indices, unsigned num_seqs, int *sum, int perm_offset){
-    return; 
     // each block is comparing a sample with others
     int entry = blockIdx.x;
     // Each thread count all coincidences of a k-mere combination.
@@ -136,14 +156,18 @@ __global__ void sumKmereCoincidencesGlobalMemory(char *data, int *indices, unsig
         char * sequence = data+indices[entry];
         char currentSubstringFromSample[K+1];
         int counter = 0;
+        // if(entry == 0 && k_mere == 0)
+        //     printf("Primer hilo y primer kmero\n");
         bool isRepetition = true;
         for (int i = 0; i < entryLength-K; i++){
+            isRepetition = true;
             memcpy( currentSubstringFromSample, &sequence[i], K );
             currentSubstringFromSample[K] = '\0';
             for(int j = 0; j < K ; j++){
                 if (currentSubstringFromSample[j] == currentKmere[j])
                     continue;
                 isRepetition = false;
+                break;
             }
             if(isRepetition)
                 counter++;

@@ -16,18 +16,15 @@
 #include "kernels.h"
 #include "utils.cpp"
 
-#ifndef PERMS_KMERES
-#define PERMS_KMERES 64
-#endif
 
 
-#define THREADS 64
-#define N (54018*1024*128)
+#define N (54018*MAX_THREADS*128)
 #define PRINT_ANSWERS false
 #define PRINT_ANSWERS_FILE true
 
-#define BLOCKS_STEP_1 40000
+
 #define MAX_SEQS 1000
+#define BLOCKS_STEP_1 MAX_SEQS
 #define VERBOSE true
 
 using namespace std;
@@ -40,8 +37,8 @@ long threads = THREADS;
 //long blocks = 5000; // 2.0511
 long blocks = 1000; // 2.012
 
-// TODO: dinámico, si el número de hilos necesario es menor de 1024, usar esa cantidad
-int threadsStep1 = 1024;
+// TODO: dinámico, si el número de hilos necesario es menor de MAX_THREADS, usar esa cantidad
+int threadsStep1 = MAX_THREADS;
 int blockThread1 = BLOCKS_STEP_1;
 bool bug_log = false;
 string file = "/home/acervantes/kmerDist/plants.fasta";
@@ -121,9 +118,14 @@ int main() {
     // 65536 max constant memory
     if (VERBOSE){
         std::cout << "K = " << K << std::endl;
+        std::cout << PERMS_KMERES  << " Permutations" << std::endl;
         std::cout << PERMS_KMERES * sizeof(char) * (K+1) << "/65536 bytes allocated" << std::endl;
         std::cout << "Máximum " << MAX_WORDS << " words in constant memory" << std::endl;
+        std::cout << "Máximum " << MAX_SHARED_INT << " integers in shared memory" << std::endl;
+        
         std::cout << "(words size "<< K+1 << " bytes)";
+        if(PRINT_ANSWERS_FILE)
+        std::cout << "Printing results in files" << std::endl;
         
     }
 
@@ -138,6 +140,7 @@ int main() {
     std::cout << seqs.size() << " sequences read ." << std::endl;
 
     doSequentialKmereDistance();
+    
     printf("\n\aParallel:\n");
     // Device allocation
     doParallelKmereDistance();
@@ -157,7 +160,7 @@ void doSequentialKmereDistance(){
     //        }
     //    }
     clock_t start_ser = clock();
-    sequentialKmerCount2(seqs, permutationsList, 3);
+    sequentialKmerCount2(seqs, permutationsList, K);
     clock_t end_ser = clock();
     double serialTimer = 0;
     serialTimer = double (end_ser-start_ser) / double(CLOCKS_PER_SEC);
@@ -268,7 +271,7 @@ void doParallelKmereDistance(){
     
 
     //for(int perm_offset = 0; perm_offset < PERMS_KMERES; perm_offset += MAX_WORDS){
-    for(int perm_offset = 0; perm_offset < 1 ; perm_offset += MAX_WORDS){
+    for(int perm_offset = 0; perm_offset < PERMS_KMERES ; perm_offset += MAX_WORDS){
         // Actualizamos los valores de las permutaciones de k-meros
         for(int i = 0; i < MAX_WORDS && i < PERMS_KMERES; i++){
             //std::cout << "Copying:" << perms[i] << std::endl;
@@ -278,18 +281,25 @@ void doParallelKmereDistance(){
                 return;
             }
         }
-        // TODO: Si el número de permutaciones (MAX_WORDS) excede el número de hilos (1024), calendarizar también
-        sumKmereCoincidencesGlobalMemory<<<blockThread1, threadsStep1>>>
-                (data, indexes, numberOfSequenses, sums, perm_offset);
-        cudaDeviceSynchronize();
-        err_ = cudaGetLastError();
-        if (err_)
-            printf("LastError sumCoincidences #%d\n", err_);
-        else
-            printf("Running ok\n");
-        return;        
+        //Si el número de permutaciones (MAX_WORDS) excede el número de hilos (1024), se calendariza también
+        for(int j = 0; j < MAX_WORDS && j < PERMS_KMERES ; j+= MAX_THREADS){
+            if((MAX_WORDS - j) >= MAX_THREADS )
+                threadsStep1 = MAX_THREADS;
+            else
+                threadsStep1 = MAX_WORDS - j;
+            sumKmereCoincidencesGlobalMemory<<<blockThread1, threadsStep1>>>
+                (data, indexes, numberOfSequenses, sums, perm_offset+MAX_THREADS*j);
+            cudaDeviceSynchronize();
+            err_ =  cudaGetLastError();
+            if (err_){
+                printf("LastError sumCoincidences #%d\n", err_);
+                printf("loop j=%d offset=%d. %d threads executed\n", j, perm_offset, threadsStep1);
+                exit(-1);
+                return;
+            }
+            else;  //printf("Running ok j=%d %d threads\n", j, threadsStep1);
+        }
     }
-    return;
     // sumKmereCoincidencesGlobalMemory<<<blockThread1, threadsStep1>>>(data, indexes, numberOfSequenses, sums);
     // cudaDeviceSynchronize();
     // err_ = cudaGetLastError();
@@ -301,15 +311,17 @@ void doParallelKmereDistance(){
     float parallelTimer = 0;
     cudaEventElapsedTime(&parallelTimer, start, stop);
     cout<< "Elapsed parallel timer step 1: " << parallelTimer << " ms, " << parallelTimer / 1000 << " secs" <<endl;
-    /*printf("Sums:\n");
-    for(int j = 0, idx = 0; j < PERMS_KMERES; j++){
-        printf("%d: ", j);
-        for(int i = 0; i < numberOfSequenses; i++){
-            printf("%d,\t", sums[idx++]);
-        }
-        printf("\n");
-    }
-    printf("\n");*/
+    // //float sumcheck = 0;
+    // printf("Sums:\n");
+    // for(int j = 0, idx = 0; j < PERMS_KMERES; j++){
+    //     printf("%d: ", j);
+    //     //sumcheck += sums[idx];
+    //     for(int i = 0; i < numberOfSequenses; i++){
+    //         printf("%d,\t", sums[idx++]);
+    //     }
+    //     printf("\n");
+    // }
+
     /**
      * Paso 2: calcular las distancias de todo vs todo.
      *      Para toda cadena i:
@@ -328,7 +340,8 @@ void doParallelKmereDistance(){
     // ejecutando kernel 374 ms
     cudaEventRecord(start, nullptr);
     for(int i = 0; i < numberOfSequenses; i++){
-        for(int perm_offset = 0; perm_offset < PERMS_KMERES; perm_offset += (int)MAX_SHARED_MEM / sizeof(int)){
+        for(int perm_offset = 0; perm_offset < PERMS_KMERES ; perm_offset += MAX_SHARED_INT){
+            //printf("Executing second step...\n");
             minKmeres2<<<blocks, threads>>>(sums, mins, numberOfSequenses, i, indexes, perm_offset);
             cudaDeviceSynchronize();
             err_ = cudaGetLastError();
@@ -338,10 +351,6 @@ void doParallelKmereDistance(){
             }
         }
     }
-    cudaDeviceSynchronize();
-    err_ = cudaGetLastError();
-    if (err_)
-        printf("LastError kmere dist: %d\n", err_);
     cudaEventRecord(stop, nullptr);
     cudaEventSynchronize(stop);
     parallelTimer = 0;
