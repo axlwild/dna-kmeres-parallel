@@ -273,7 +273,7 @@ void doParallelKmereDistance(){
     
     //for(int perm_offset = 0; perm_offset < PERMS_KMERES; perm_offset += MAX_WORDS){
     for(int perm_offset = 0; perm_offset < PERMS_KMERES ; perm_offset += MAX_WORDS){
-        std::cout << "Loop offset:" << perm_offset << std::endl;
+        //std::cout << "Loop offset:" << perm_offset << std::endl;
         // Actualizamos los valores de las permutaciones de k-meros
         for(int i = 0; i < MAX_WORDS && i + perm_offset < PERMS_KMERES; i++){
             // if(i+perm_offset == 16383)
@@ -320,17 +320,18 @@ void doParallelKmereDistance(){
     cudaEventElapsedTime(&parallelTimer, start, stop);
     cout<< "Elapsed parallel timer step 1: " << parallelTimer << " ms, " << parallelTimer / 1000 << " secs" <<endl;
         
-        // float sumcheck = 0;
-        // printf("Sums:\n");
-        // for(int j = 0, idx = 0; j < PERMS_KMERES; j++){
-        //     printf("%s\t(%d): ", perms[j],j);
-        //     sumcheck += sums[idx];
-        //     for(int i = 0; i < numberOfSequenses; i++){
-        //         printf("%d,\t", sums[idx++]);
-        //     }
-        //     printf("\n");
-        // }
-        // printf("Sumcheck: %f\n", sumcheck);
+    // float sumcheck = 0;
+    // printf("Sums:\n");
+    // for(int j = 0, idx = 0; j < PERMS_KMERES; j++){
+    //     printf("%s\t(%d): ", perms[j],j);
+    //     sumcheck += sums[idx];
+    //     for(int i = 0; i < numberOfSequenses; i++){
+    //         printf("%d,\t", sums[idx++]);
+    //     }
+    //     printf("\n");
+    // }
+    // printf("Sumcheck: %f\n", sumcheck);
+
     /**
      * Paso 2: calcular las distancias de todo vs todo.
      *      Para toda cadena i:

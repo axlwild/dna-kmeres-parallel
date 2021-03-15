@@ -11,7 +11,7 @@
 #ifndef K
 // la limitación de K se da más por la memoria compartida que por la constante.
 // ya que usamos int para el contador en memoria compartida
-#define K 7
+#define K 10
 #endif
 
 #ifndef PERMS_KMERES
@@ -94,7 +94,7 @@ __global__ void minKmeres2(int *sums, float *mins, int num_seqs, int current_seq
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int idxGap = idx + current_seq ;
     int tid = threadIdx.x + perm_offset;
-    if(tid < PERMS_KMERES && (tid - perm_offset) < MAX_THREADS){
+    if(tid < PERMS_KMERES && (threadIdx.x) < MAX_THREADS){
         current_seq_kmeres[threadIdx.x] = sums[tid*num_seqs+current_seq];
     }
     __syncthreads();
@@ -107,18 +107,27 @@ __global__ void minKmeres2(int *sums, float *mins, int num_seqs, int current_seq
         if (entryLength < compLength)
             compLength = entryLength;
         long aux = getIdxTriangularMatrixRowMajor(current_seq+1, idxGap - current_seq , (long)num_seqs);
-        for(int i = 0; i < PERMS_KMERES && i < MAX_THREADS; i++){
-            if(aux == 0 && perm_offset == 0){
-                if(current_seq_kmeres[i] != sums[idxGap+num_seqs*(i+perm_offset)]){ 
-                    printf("Offset: %d\n", perm_offset);
-                    printf("idx:%d\tsumsIdx:%d\t(idxGap:%d)\n",i, idxGap+num_seqs*i, idxGap);
-                    printf("%d\t%d\n\n",current_seq_kmeres[i], sums[idxGap+num_seqs*(i+perm_offset)]);
-                }
+        for(int i = 0; i + perm_offset < PERMS_KMERES && i < MAX_THREADS; i++){
+            // if(aux == 0 && perm_offset == 0){
+            //     if(current_seq_kmeres[i] != sums[idxGap+num_seqs*(i+perm_offset)]){ 
+            //         printf("Offset: %d\n", perm_offset);
+            //         printf("idx:%d\tsumsIdx:%d\t(idxGap:%d)\n",i, idxGap+num_seqs*i, idxGap);
+            //         printf("%d\t%d\n\n",current_seq_kmeres[i], sums[idxGap+num_seqs*(i+perm_offset)]);
+            //     }
+            // }
+            if(current_seq_kmeres[i] <= sums[idxGap+num_seqs*(i+perm_offset)]){
+                // if(aux == 1){
+                //     printf("Sum: %d %d\n", i, current_seq_kmeres[i]);
+                // }
+                sumMins += (float)current_seq_kmeres[i];
             }
-            if(current_seq_kmeres[i] <= sums[idxGap+num_seqs*(i+perm_offset)])
-                sumMins += current_seq_kmeres[i];
-            else 
-                sumMins += sums[idxGap+num_seqs*i];
+            else {
+                // if(aux == 1){
+                //     printf("Sum: %d %d\n", i, sums[idxGap+num_seqs*i]);
+                // }
+                sumMins += (float)sums[idxGap+num_seqs*(i+perm_offset)];
+            }
+                
         }
         // if(aux == 0){
         //     printf("compLength: %d\n", compLength);
@@ -136,17 +145,17 @@ __global__ void minKmeres2(int *sums, float *mins, int num_seqs, int current_seq
         // else
         // TODO: checar que dé 0 en las primeras distancias.
         if(final){
-            // if(aux == 0){
-            //     printf("Mins[0]: %f\n", mins[0] + sumMins);
+            // if(aux == 1){
+            //     printf("Mins[1]: %f\n", mins[1] + sumMins);
             // }
             mins[aux] = 1 - (mins[aux] + sumMins)/((compLength) - K + 1);
         }
         else{
             mins[aux] += sumMins;   
         }
-        // if(aux == 0){
-        //     printf("Mins[0]: %f\n", mins[0]);
-        //     if(final) printf("Final Mins[0]: %f\n", mins[0]);
+        // if(aux == 1){
+        //     printf("Mins[1]: %f\n", mins[1]);
+        //     if(final) printf("Final Mins[0]: %f\n", mins[1]);
         // }
     }
 }
