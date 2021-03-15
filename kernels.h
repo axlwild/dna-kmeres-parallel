@@ -11,7 +11,7 @@
 #ifndef K
 // la limitación de K se da más por la memoria compartida que por la constante.
 // ya que usamos int para el contador en memoria compartida
-#define K 10
+#define K 4
 #endif
 
 #ifndef PERMS_KMERES
@@ -167,6 +167,11 @@ __global__ void sumKmereCoincidencesGlobalMemory(char *data, int *indices, unsig
     int entry = blockIdx.x;
     // Each thread count all coincidences of a k-mere combination.
     int k_mere = threadIdx.x+perm_offset;
+    if(threadIdx.x == 0){
+        printf("Hola\n");
+        printf("%d seqs\n", num_seqs);
+        printf("Secuencia actual: %d\n", entry);
+    }
     if ((entry < num_seqs) && ((k_mere) < PERMS_KMERES )){
         // Fase uno: sumamos todos los valores de la suma de los k-meros de cada entrada.
         // Cada bloque se encarga de cada cadena de entrada

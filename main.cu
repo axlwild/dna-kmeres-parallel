@@ -472,7 +472,7 @@ void importSeqsNoNL(string inputFile){
                     break;
                 }
                 acc += line;
-                if(seqs.size() >= MAX_SEQS) break;
+                if(seqs.size()  >= MAX_SEQS - 1 ) break;
             }
             if (acc != ""){
                 acc += "|";
@@ -482,7 +482,7 @@ void importSeqsNoNL(string inputFile){
                 globalAcc += acc;
                 acc = "";
                 indexes_aux.push_back(indexCounter);
-                if(seqs.size() >= MAX_SEQS) break;
+                if(seqs.size() >= MAX_SEQS - 1) break;
             }
         }
     }
@@ -544,7 +544,7 @@ void importSeqs(string inputFile){
                     break;
                 }
                 acc += line;
-                if(seqs.size() >= MAX_SEQS) break;
+                if(seqs.size() >= MAX_SEQS - 1) break;
             }
             if (acc != ""){
                 acc += "|";
@@ -554,7 +554,7 @@ void importSeqs(string inputFile){
                 globalAcc += acc;
                 acc = "";
                 indexes_aux.push_back(indexCounter);
-                if(seqs.size() >= MAX_SEQS) break;
+                if(seqs.size() >= MAX_SEQS - 1) break;
             }
         }
     }
