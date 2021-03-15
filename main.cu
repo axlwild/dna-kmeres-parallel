@@ -35,7 +35,7 @@ long threads = THREADS;
 //long blocks = 32768; // 2.61
 //long blocks = 30000; // 2.32
 //long blocks = 5000; // 2.0511
-long blocks = 1000; // 2.012
+long blocks = 30000; // 2.012
 
 int threadsStep1 = MAX_THREADS;
 int blockThread1 = BLOCKS_STEP_1;
@@ -69,7 +69,10 @@ int     *sums; // coincidences of k-mer on each input
 float   *mins;
 long minsSize;
 long resultsArraySize;
-
+/**
+* TODO: pruebas con k de 2 a 10.
+* TODO: implementar muscle con código de CUDA.
+**/
 
 // 4 cadenas sería 1 bit
 // 1111 1111 = 1 byte
@@ -89,13 +92,14 @@ long resultsArraySize;
 std::map<std::string, int> permutationsMap;
 vector<string> permutationsList;
 char **perms;
+int permsSize;
 float * distancesSequential;
 
 int main() {
 
     const char *alphabet = "ACGT";
     int sizeAlphabet = 4;
-    int permsSize    = pow(sizeAlphabet, K);
+    permsSize    = pow(sizeAlphabet, K);
     perms = (char**) malloc(permsSize * sizeof(char*));
     for(int i = 0; i < permsSize; i++)
     {
@@ -267,15 +271,20 @@ void doParallelKmereDistance(){
      *
      */
     
-
     //for(int perm_offset = 0; perm_offset < PERMS_KMERES; perm_offset += MAX_WORDS){
     for(int perm_offset = 0; perm_offset < PERMS_KMERES ; perm_offset += MAX_WORDS){
+        std::cout << "Loop offset:" << perm_offset << std::endl;
         // Actualizamos los valores de las permutaciones de k-meros
-        for(int i = 0; i < MAX_WORDS && i < PERMS_KMERES; i++){
-            //std::cout << "Copying:" << perms[i] << std::endl;
+        for(int i = 0; i < MAX_WORDS && i + perm_offset < PERMS_KMERES; i++){
+            // if(i+perm_offset == 16383)
+            //     std::cout << "Copying in index " << i << " value " << perms[i+perm_offset]  <<
+            //             " OFFSET:" << i+perm_offset << std::endl;
+            
             err_ = cudaMemcpyToSymbol(c_perms, perms[i+perm_offset], (K+1), i*(K+1));
             if(err_){
                 std::cout << "Error i=" << i << " OFFSET: " << perm_offset << " error #" << err_ << std::endl;
+                std::cout << "K=" << K << " MAX_WORDS: " << MAX_WORDS << std::endl;
+                std::cout << "Num_perms=" << permsSize << std::endl;
                 return;
             }
         }
@@ -287,7 +296,7 @@ void doParallelKmereDistance(){
                 threadsStep1 = MAX_WORDS - j;
             //std::cout << "Step 1 with offset " << perm_offset+j << std::endl;
             sumKmereCoincidencesGlobalMemory<<<blockThread1, threadsStep1>>>
-                (data, indexes, numberOfSequenses, sums, perm_offset+j);
+                (data, indexes, numberOfSequenses, sums, perm_offset+j, j);
             cudaDeviceSynchronize();
             err_ =  cudaGetLastError();
             if (err_){
@@ -310,18 +319,18 @@ void doParallelKmereDistance(){
     float parallelTimer = 0;
     cudaEventElapsedTime(&parallelTimer, start, stop);
     cout<< "Elapsed parallel timer step 1: " << parallelTimer << " ms, " << parallelTimer / 1000 << " secs" <<endl;
-    // float sumcheck = 0;
-    // printf("Sums:\n");
-    // for(int j = 0, idx = 0; j < PERMS_KMERES; j++){
-    //     printf("%s\t(%d): ", perms[j],j);
-    //     sumcheck += sums[idx];
-    //     for(int i = 0; i < numberOfSequenses; i++){
-    //         printf("%d,\t", sums[idx++]);
-    //     }
-    //     printf("\n");
-    // }
-    // printf("Sumcheck: %f\n", sumcheck);
-
+        
+        // float sumcheck = 0;
+        // printf("Sums:\n");
+        // for(int j = 0, idx = 0; j < PERMS_KMERES; j++){
+        //     printf("%s\t(%d): ", perms[j],j);
+        //     sumcheck += sums[idx];
+        //     for(int i = 0; i < numberOfSequenses; i++){
+        //         printf("%d,\t", sums[idx++]);
+        //     }
+        //     printf("\n");
+        // }
+        // printf("Sumcheck: %f\n", sumcheck);
     /**
      * Paso 2: calcular las distancias de todo vs todo.
      *      Para toda cadena i:
