@@ -26,8 +26,8 @@
 #define MAX_BLOCKS 65535
 // Referencia del máximo de secuencias por el que está pensado este algoritmo.
 #define LIMIT_REF_SEQS 50000
-
-#define MAX_SEQS 10000
+// en 1043 ya es diferente
+#define MAX_SEQS 40000 
 #define BLOCKS_STEP_1 MAX_SEQS
 #define VERBOSE true
 // Bloques necesarios para satisfacer todas las entradas en un ciclo.
@@ -48,9 +48,9 @@ int threadsStep1 = MAX_THREADS;
 int blockThread1 = BLOCKS_STEP_1;
 bool bug_log = false;
 //string file = "/home/acervantes/kmerDist/plants_mod.fasta";
-//string file = "/home/acervantes/kmerDist/all_seqs.fasta";
+string file = "/home/acervantes/kmerDist/all_seqs.fasta";
 // to run this, execute importSeqsNoNL.
-string file = "/home/acervantes/kmerDist/genomic.fna";
+//string file = "/home/acervantes/kmerDist/genomic.fna";
 // Method definition
 void importSeqs(string inputFile); 
 void importSeqsNoNL(string inputFile);
@@ -143,8 +143,8 @@ int main() {
 
 
     // absolute path of the input data
-    //importSeqs(file);
-    importSeqsNoNL(file);
+    importSeqs(file);
+    //importSeqsNoNL(file);
     resultsArraySize = numberOfSequenses*(numberOfSequenses+1) / 2 - numberOfSequenses;
     std::cout << "Size all seqs:" << size_all_seqs << std::endl;
     std::cout << seqs.size() << " sequences read ." << std::endl;
@@ -369,11 +369,12 @@ void doParallelKmereDistance(){
     // ejecutando kernel 374 ms
     cudaEventRecord(start, nullptr);
     // Se procesan LIMIT_REF_SEQS / blocks_per_entry_step_2 entradas por iteración
+    //                      50000 / 48 = 1041
     for(int i = 0; i < numberOfSequenses; i += LIMIT_REF_SEQS / blocks_per_entry_step_2){
         bool finalStep = false;
         //printf("Loop...\n");
         for(int perm_offset = 0; perm_offset < PERMS_KMERES ; perm_offset += MAX_SHARED_INT){
-            printf("LOOP %d\n", i);
+            //printf("LOOP %d\n", i);
             // Al ejecutarse solo alcanza a guardar en memoria compartida 1024 elementos como máximo.
             // Si quisiéramos guardar más elemtos que esos, no podemos. Tendríamos qué ejecutar de nuevo.
             
@@ -383,7 +384,7 @@ void doParallelKmereDistance(){
             //     printf("Final step...\n");
             // }
             //printf("Ejecutando %d bloques y %d hilos", blocks, threads);
-            minKmeres2<<<blocks, threads>>>(sums, mins, numberOfSequenses, i, indexes, perm_offset, finalStep, blocks_per_entry_step_2);
+            minKmeres2<<<blocks, threads>>>(sums, mins, numberOfSequenses, i, indexes, perm_offset, finalStep, blocks_per_entry_step_2, LIMIT_REF_SEQS / blocks_per_entry_step_2);
             cudaDeviceSynchronize();
             err_ = cudaGetLastError();
             if (err_){

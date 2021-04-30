@@ -11,7 +11,7 @@
 #ifndef K
 // la limitación de K se da más por la memoria compartida que por la constante.
 // ya que usamos int para el contador en memoria compartida
-#define K 3
+#define K 4
 #endif
 
 #ifndef PERMS_KMERES
@@ -91,17 +91,21 @@ __global__ void minKmeres1(int *sums, float *mins, int num_seqs, int current_seq
 // Idea: intentar aprovechar los bloques:
 // si es par, procesa la secuencia par
 // si es impar, procesa la secuencia impar.
-
-__global__ void minKmeres2(int *sums, float *mins, int num_seqs, int num_seq_offset, int* indexes, int perm_offset, bool final, int blocks_per_entry){
+// lim_ref_seqs -> máximo de secuencias que puede recibir el algoritmo
+__global__ void minKmeres2(int *sums, float *mins, int num_seqs, int num_seq_offset, int* indexes, int perm_offset, bool final, 
+        int blocks_per_entry, 
+        int max_sequenses_per_call)
+{
     __shared__ int current_seq_kmeres[MAX_SHARED_INT]; // current_seq_kmeres[PERMS_KMERES];
 
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     // La secuencia cuyo k-mero se va a guardar en memoria compartida.
     int currentSequence = num_seq_offset + (blockIdx.x / blocks_per_entry);
+    if (((int)(blockIdx.x / blocks_per_entry)) >= max_sequenses_per_call) return;
     // idxGap es la secuencia contra la que se está comparando con el hilo actual.
     int idxGap = (idx / (blocks_per_entry * blockDim.x)) + // Ubica la entrada actual
                     (idx) % (blocks_per_entry * blockDim.x)  // Aumentaría el hilo actual correctamente
-                    + 1 // hipótesis, el siguiente del que queremos calcular...
+                    + 1
                     ;
     /*
         perm_offset sirve en caso de que haya más kmeros que memoria compartida.
@@ -109,14 +113,16 @@ __global__ void minKmeres2(int *sums, float *mins, int num_seqs, int num_seq_off
     int tid = threadIdx.x + perm_offset;
     //    if(tid < PERMS_KMERES){
         int auxSharedMem = 0;
-        while(auxSharedMem + tid < MAX_SHARED_INT){
-            if(auxSharedMem + tid < PERMS_KMERES && tid < PERMS_KMERES && currentSequence < num_seqs)
+        while(auxSharedMem + threadIdx.x < MAX_SHARED_INT){
+            if(auxSharedMem + threadIdx.x < PERMS_KMERES && threadIdx.x < PERMS_KMERES && currentSequence < num_seqs)
                 current_seq_kmeres[threadIdx.x + auxSharedMem] = sums[(tid+auxSharedMem)*num_seqs+currentSequence];
             else
                 current_seq_kmeres[threadIdx.x + auxSharedMem] = 0;
             auxSharedMem += blockDim.x;
         }
     //}
+        
+
     __syncthreads();
     int entryLength;
     int compLength;
@@ -131,9 +137,10 @@ __global__ void minKmeres2(int *sums, float *mins, int num_seqs, int num_seq_off
         float sumMins = 0;
         entryLength = indexes[currentSequence + 1] -  indexes[currentSequence] - 1;
         compLength = indexes[idxGap + 1] -  indexes[idxGap] -1;
+        long aux = getIdxTriangularMatrixRowMajor(currentSequence+1, idxGap - currentSequence , (long)num_seqs);
         if (entryLength < compLength)
             compLength = entryLength;
-        long aux = getIdxTriangularMatrixRowMajor(currentSequence+1, idxGap - currentSequence , (long)num_seqs);
+        
         for(int i = 0; i + perm_offset < PERMS_KMERES; i++){
             if(current_seq_kmeres[i] <= sums[idxGap+num_seqs*(i+perm_offset)]){
                 sumMins += (float)current_seq_kmeres[i];
@@ -145,18 +152,12 @@ __global__ void minKmeres2(int *sums, float *mins, int num_seqs, int num_seq_off
         }
             
         if(final){
-            // if(aux == 1){
-            //     printf("Mins[1]: %f\n", mins[1] + sumMins);
-            // }
+            //if(mins[aux] == 0)
             mins[aux] = 1 - (mins[aux] + sumMins)/((compLength) - K + 1);
         }
         else{
             mins[aux] += sumMins;   
         }
-        // if(aux == 1){
-        //     printf("Mins[1]: %f\n", mins[1]);
-        //     if(final) printf("Final Mins[0]: %f\n", mins[1]);
-        // }
     }
 }
 /*
