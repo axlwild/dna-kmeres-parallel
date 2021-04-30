@@ -22,10 +22,17 @@
 #define PRINT_ANSWERS false
 #define PRINT_ANSWERS_FILE true
 
+// máximo de bloques soportados por la arquitectura.
+#define MAX_BLOCKS 65535
+// Referencia del máximo de secuencias por el que está pensado este algoritmo.
+#define LIMIT_REF_SEQS 50000
 
-#define MAX_SEQS 1000
+#define MAX_SEQS 10000
 #define BLOCKS_STEP_1 MAX_SEQS
 #define VERBOSE true
+// Bloques necesarios para satisfacer todas las entradas en un ciclo.
+int blocks_per_entry_step_2 = LIMIT_REF_SEQS / MAX_THREADS;
+
 
 using namespace std;
 int          numberOfSequenses = 0;
@@ -35,15 +42,15 @@ long threads = THREADS;
 //long blocks = 32768; // 2.61
 //long blocks = 30000; // 2.32
 //long blocks = 5000; // 2.0511
-long blocks = 30000; // 2.012
+long blocks = MAX_BLOCKS; // 2.012
 
 int threadsStep1 = MAX_THREADS;
 int blockThread1 = BLOCKS_STEP_1;
 bool bug_log = false;
-string file = "/home/acervantes/kmerDist/plants_mod.fasta";
+//string file = "/home/acervantes/kmerDist/plants_mod.fasta";
 //string file = "/home/acervantes/kmerDist/all_seqs.fasta";
 // to run this, execute importSeqsNoNL.
-//string file = "/home/acervantes/kmerDist/genomic.fna";
+string file = "/home/acervantes/kmerDist/genomic.fna";
 // Method definition
 void importSeqs(string inputFile); 
 void importSeqsNoNL(string inputFile);
@@ -136,8 +143,8 @@ int main() {
 
 
     // absolute path of the input data
-    importSeqs(file);
-    //importSeqsNoNL(file);
+    //importSeqs(file);
+    importSeqsNoNL(file);
     resultsArraySize = numberOfSequenses*(numberOfSequenses+1) / 2 - numberOfSequenses;
     std::cout << "Size all seqs:" << size_all_seqs << std::endl;
     std::cout << seqs.size() << " sequences read ." << std::endl;
@@ -288,6 +295,18 @@ void doParallelKmereDistance(){
                 return;
             }
         }
+
+        /**
+        k = 3 | alfabeto = {A, C, G, T}
+        A, C, G, T
+        4**k = 4**3 = 64
+
+        S0, S1, S2, S3..., Sn-1
+    AAA 3
+    AAC 10
+    ..
+    TTT    
+        */
         //Si el número de permutaciones (MAX_WORDS) excede el número de hilos (1024), se calendariza también
         for(int j = 0; j < MAX_WORDS && j < PERMS_KMERES ; j+= MAX_THREADS){
             if((MAX_WORDS - j) >= MAX_THREADS )
@@ -349,23 +368,26 @@ void doParallelKmereDistance(){
     // sin ejecutar kernel tarda aprox 344 ms
     // ejecutando kernel 374 ms
     cudaEventRecord(start, nullptr);
-    for(int i = 0; i < numberOfSequenses; i++){
+    // Se procesan LIMIT_REF_SEQS / blocks_per_entry_step_2 entradas por iteración
+    for(int i = 0; i < numberOfSequenses; i += LIMIT_REF_SEQS / blocks_per_entry_step_2){
         bool finalStep = false;
         //printf("Loop...\n");
-        for(int perm_offset = 0; perm_offset < PERMS_KMERES ; perm_offset += THREADS){
+        for(int perm_offset = 0; perm_offset < PERMS_KMERES ; perm_offset += MAX_SHARED_INT){
+            printf("LOOP %d\n", i);
             // Al ejecutarse solo alcanza a guardar en memoria compartida 1024 elementos como máximo.
             // Si quisiéramos guardar más elemtos que esos, no podemos. Tendríamos qué ejecutar de nuevo.
             
-            finalStep = (perm_offset + THREADS >= PERMS_KMERES);
+            finalStep = (perm_offset + MAX_SHARED_INT >= PERMS_KMERES);
             // printf("Executing second step...\n");
             // if(finalStep){
             //     printf("Final step...\n");
             // }
-            minKmeres2<<<blocks, threads>>>(sums, mins, numberOfSequenses, i, indexes, perm_offset, finalStep);
+            //printf("Ejecutando %d bloques y %d hilos", blocks, threads);
+            minKmeres2<<<blocks, threads>>>(sums, mins, numberOfSequenses, i, indexes, perm_offset, finalStep, blocks_per_entry_step_2);
             cudaDeviceSynchronize();
             err_ = cudaGetLastError();
             if (err_){
-                printf("LastError kmere dist: %d iteration %d\n", err_, i);
+                printf("LastError kmere dist: %d iteration %d, %d block per entry \n", err_, i, blocks_per_entry_step_2);
                 exit(1);
             }
         }
